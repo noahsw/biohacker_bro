@@ -37,7 +37,7 @@ seconds. This is a costume prop, not a medical device — the goal is
 | Heart rate source | Whoop strap | HR Broadcast mode enabled in the Whoop app — broadcasts the **standard Bluetooth Heart Rate Service (0x180D)**, same protocol used by gym equipment. Whoop does NOT expose steps, HRV, recovery, etc. over this BLE service — only HR. |
 | Accelerometer (steps) | GY-521 breakout (MPU-6050) | 3–5V tolerant onboard regulator. Wired to VCC (3.3V), GND, SDA→IO45, SCL→IO46. |
 | Mic | Onboard ES7210 codec + dual mics | Already on the main board. I2S pins **not yet confirmed** — see Known Unknowns. |
-| Power | Anker 537 PowerCore 24K (24,000mAh) | Two USB-C ports — one powers the ESP32-S3 board, the other powers the panel directly. At plain 5V (not higher PD voltages), each port maxes around 3A (~15W) — under the panel's "4A for full brightness" spec but above its 2.5A minimum, so it runs fine at slightly reduced brightness. Estimated runtime well beyond the 5-hour party (see calc below). |
+| Power | Anker 537 PowerCore 24K (24,000mAh) | Two USB-C ports feed the controller board's **two** USB-C inputs, which are separate rails ("Board" + "Panel"). The panel is then fed from the board's **VH-4P (3.96mm) 5V/4A output** — that is the board's designed panel path, and it keeps the panel's current off the ESP32's rail. The panel asks 5V/2.5A min via its VH4 header, so the 4A output covers it. At plain 5V (not higher PD voltages) each Anker port maxes around 3A (~15W). Estimated runtime well beyond the 5-hour party (see calc below). |
 
 **Runtime estimate:** 24,000mAh × 3.7V ≈ 88.8Wh, ~75-80Wh usable after
 USB-C conversion losses. At a realistic draw for this display (dark
@@ -63,8 +63,15 @@ running, but if boot ever becomes unreliable with the sensor attached,
 this is the first thing to investigate.
 
 **HUB75 panel → ESP32-S3 board:** connects via the included ribbon cable
-between the board's HUB75 header and the panel's "IN" port. **Exact pin
-mapping is not yet confirmed** — see Known Unknowns below.
+between the board's HUB75 header and the panel's **"IN"** port (the panel's
+second header is an OUT for chaining). The controller's "2x HUB75" is just
+two connector styles for the same signals — a boxed header and a direct-plug
+header — so use whichever fits the ribbon. GPIO mapping is confirmed and
+lives in `config.h`; see Known Unknowns below for the source and the two
+traps (G1 is the lower GPIO, and E stays -1 on a 1/16-scan panel).
+
+**Panel power:** not from the ribbon — via the board's VH-4P 5V/4A output to
+the panel's VH4 input. See the Power row in the hardware table.
 
 ## Software architecture
 
@@ -81,9 +88,10 @@ subsystems:
    library), computes acceleration magnitude, and counts a step whenever
    the magnitude deviates from the ~1g baseline past a threshold, with a
    debounce window to avoid double-counting.
-3. **Decibel/mic level** — placeholder pending I2S pin confirmation (see
-   below); currently outputs a fake wobble so the rest of the system
-   isn't blocked on it.
+3. **Decibel/mic level** — I2S pins are now known but untested, and the
+   ES7210 still needs register init, so this remains a placeholder that
+   outputs a fake wobble (see Known Unknowns) rather than real audio. The
+   rest of the system is not blocked on it.
 4. **Display rendering** — `ESP32-HUB75-MatrixPanel-I2S-DMA` library
    (Arduino Library Manager listing name: **"ESP32 HUB75 LED MATRIX PANEL
    DMA Display"** by MrCodetastic — the GitHub repo was renamed from
@@ -94,14 +102,26 @@ subsystems:
 
 ## Known unknowns / TODOs (be upfront about these — don't guess silently)
 
-- **HUB75 pin mapping**: the sketch currently has a *placeholder* pin
-  assignment based on common ESP32-S3 HUB75 board layouts, NOT confirmed
-  against WatangTech's actual schematic. Needs verification from the
-  product's documentation/wiki or the board's silkscreen labels once
-  physically in hand.
-- **Mic I2S pins** (BCLK/WS/DATA for the ES7210 codec): vendor-specific,
-  not yet known. The decibel subsystem is written to be easy to complete
-  once these are found, but shouldn't be guessed at.
+- **HUB75 pin mapping**: RESOLVED. The board is sold under the WatangTech
+  name but its model is Seengreat's **"RGB Matrix HUB75 S3"** — confirmed
+  against the controller's spec sheet (same model name, ESP32-S3-WROOM-1
+  -N16R8, 16MB/8MB, 2x USB-C in, VH-4P 5V/4A out, 2x HUB75, ES7210 + ES8311,
+  SD + PCF85063 RTC). That model's wiki publishes the GPIO mapping:
+  https://seengreat.com/wiki/214/rgb-matrix-hub75-s3 — `config.h` now uses
+  it, **with one correction made on hardware: the wiki has G and B
+  transposed.** It publishes G1=IO4 / B1=IO6 and G2=IO7 / B2=IO17, but with
+  those values a full-screen green renders blue and blue renders green, on
+  both row halves. `config.h` swaps them. Everything else in that table (R,
+  A-E, CLK, LAT, OE) was correct as published. This error is invisible unless
+  you test named colours — `begin()` succeeds, geometry is perfect, text is
+  legible — so anyone following that page ships with green and blue swapped
+  and no sign anything is wrong.
+  `E_PIN` stays -1: E is wired to IO16, but the Waveshare panel is 1/16 scan
+  (per its own user guide) and only uses A-D.
+- **Mic I2S pins**: now known from the same wiki (MCLK=38, BCLK=48, WS=21,
+  mic data in / SDOUT=47), but untested — and the ES7210 almost certainly
+  needs I2C register setup before it streams anything, so `MIC_CONFIGURED`
+  stays `false` until real audio is confirmed.
 - **Step detection threshold** (`STEP_THRESHOLD` in code): a starting
   guess. Needs real-world tuning once worn, since stride and mounting
   position affect it.
@@ -146,6 +166,26 @@ was split:
    the SessionStart hook in `.claude/settings.json` creates that symlink
    automatically. See `secrets.h.example`.
 
+## Building and flashing from the command line
+
+Faster than the IDE for iterating, and it is how the board was brought up:
+
+```
+FQBN="esp32:esp32:esp32s3:CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=app3M_fat9M_16MB"
+arduino-cli compile -b "$FQBN" wokwi_test_hub75
+arduino-cli upload  -b "$FQBN" -p /dev/cu.usbmodem201101 wokwi_test_hub75
+```
+
+Find the port with `arduino-cli board list`. That FQBN encodes the same
+settings as the IDE's Tools menu, so keep the two in sync.
+
+To watch serial, note that `arduino-cli monitor` did not reliably capture
+this board's USB-CDC output; reading the device directly did:
+
+```
+stty -f /dev/cu.usbmodem201101 115200 raw && cat /dev/cu.usbmodem201101
+```
+
 ## Gotchas found on real hardware
 
 **The Whoop connects, but the bundled ESP32 BLE library says it failed.**
@@ -171,6 +211,42 @@ failure rather than guessing:
 - It is not a connectability or address-type problem. The strap
   advertises `advType=0 CONN_ADV` with `addrType=1` (random static), and
   the library handles that correctly.
+
+**The panel's data input is J2, not J1.** The Waveshare panel has two HUB75
+headers, one input and one output for chaining, and on this panel the input is
+the one silkscreened **J2**. J1 is the output. Plugging into J1 gives a
+completely blank panel with no error of any kind — the driver initializes
+fine, `begin()` returns true, and the firmware loops happily, because nothing
+downstream reports back. Cost a full debug session; check this first if the
+panel is dark.
+
+**Bring-up diagnostics live in `wokwi_test_hub75/`.** Set `SOLID_TEST_ONLY 1`
+to loop a full-screen white/red/green/blue cycle forever and reprint the pin
+table each pass. Two reasons it exists: it removes all the pixel-art drawing
+logic from the picture when the panel is misbehaving, and because it repeats
+forever you can move cables and watch the result live instead of reflashing
+between attempts. A swapped RGB pin shows up immediately, since each screen
+announces the colour it is supposed to be. Set back to 0 when done.
+
+**Serial logging picks its port at compile time.** Under Wokwi the serial
+monitor watches UART0 (`Serial0`); on real hardware built with
+`CDCOnBoot=cdc`, the port the Mac sees is `Serial` (native USB-CDC) and
+`Serial0` goes to GPIO43/44, which isn't wired to USB. Logging to the wrong
+one is *silent*, not an error, which is a confusing way to lose a bring-up
+session. The sketch now selects automatically on `ARDUINO_USB_CDC_ON_BOOT`.
+
+**Catching boot-time serial output over USB-CDC is racy.** The port
+re-enumerates on reset, so a capture started after the reset has already
+missed `setup()`. Either reprint diagnostics from `loop()` (what
+`SOLID_TEST_ONLY` does) or accept that you will miss the first lines.
+
+**The test sketches need their own `secrets.h` symlink.** `config.h` includes
+`secrets.h`, and the preprocessor resolves that relative to the directory it
+found `config.h` in — so symlinking only `config.h` into a `wokwi_test_*/`
+dir makes every one of those sketches fail to compile with
+`fatal error: secrets.h: No such file or directory`. Each test dir needs
+`secrets.h -> ../secrets.h` alongside it. `.gitignore` matches `secrets.h` at
+any depth, so these symlinks are correctly ignored.
 
 **`find_whoop_mac/` still uses the bundled BLE library**, which is fine —
 scanning works there and the two libraries are only a problem if a single

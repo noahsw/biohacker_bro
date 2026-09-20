@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "SRC=\"$HOME/.config/biohacker_bro/secrets.h\"; DST=\"$CLAUDE_PROJECT_DIR/secrets.h\"; if [ -f \"$SRC\" ] && { [ -L \"$DST\" ] || [ ! -e \"$DST\" ]; }; then ln -sfn \"$SRC\" \"$DST\"; fi; exit 0"
+            "command": "SRC=\"$HOME/.config/biohacker_bro/secrets.h\"; DST=\"$CLAUDE_PROJECT_DIR/secrets.h\"; if [ -f \"$SRC\" ] && { [ -L \"$DST\" ] || [ ! -e \"$DST\" ]; }; then ln -sfn \"$SRC\" \"$DST\"; fi; for d in \"$CLAUDE_PROJECT_DIR\"/wokwi_test_*/; do [ -e \"$d/config.h\" ] || continue; T=\"$d/secrets.h\"; if [ -L \"$T\" ] || [ ! -e \"$T\" ]; then ln -sfn ../secrets.h \"$T\"; fi; done; exit 0"
           }
         ]
       }
