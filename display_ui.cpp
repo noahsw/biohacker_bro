@@ -44,20 +44,23 @@ uint16_t zonePalette(int zone) {
   }
 }
 
-// The same zones, brightened for the BPM digits.
+// The same zones for the BPM digits, held at a uniform brightness so the
+// number is equally readable in every zone — only the hue changes.
 //
-// The legend is a single 1px row where dimness is fine and actually helps the
-// ramp; the BPM number is 14px tall and has to be readable across a dark room.
-// Those are different jobs, so they get different values — at rest, a Z0
-// number in the legend's 45-gray would be almost invisible, which is exactly
-// when you'd most want to read it.
+// Consequence worth knowing: at equal brightness, "gray" and "white" ARE the
+// same color, so Z0 and Z1 can't be told apart in the number and both render
+// white. That's the right trade — the number's job is to be readable at rest,
+// and the bar below already says which of the two you're in. The blue and red
+// are lifted off their pure primaries for the same reason: a pure (0,110,255)
+// numeral is noticeably harder to read than a yellow one at the same nominal
+// value, because blue LEDs carry the least perceived brightness.
 uint16_t zoneTextPalette(int zone) {
   switch (zone) {
-    case 0:  return display->color565(150, 150, 150);
-    case 1:  return display->color565(255, 255, 255);
-    case 2:  return display->color565(0, 140, 255);
-    case 3:  return display->color565(255, 200, 0);
-    default: return display->color565(255, 40, 40);
+    case 0:  return display->color565(255, 255, 255); // white
+    case 1:  return display->color565(255, 255, 255); // white (see above)
+    case 2:  return display->color565(80, 165, 255);  // blue, lifted
+    case 3:  return display->color565(255, 205, 0);   // yellow
+    default: return display->color565(255, 70, 70);   // red, lifted
   }
 }
 
@@ -197,8 +200,6 @@ void updateHeartbeatPhase(int bpm) {
 void drawMainScreen(int bpm, bool connected, unsigned long steps) {
   display->clearScreen();
 
-  uint16_t zColor = connected ? zoneColor(bpm) : display->color565(60, 60, 60);
-
   // --- Heart: always red (it's a heart), pulsing in brightness on each beat.
   // Dimmed to a dark ember while we're still hunting for the strap, so a
   // stale reading can never look live.
@@ -211,14 +212,15 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
   }
   drawHeart(11, 12, 4, heartColor);
 
-  // --- BPM, in the current zone's color
+  // --- BPM, in the current zone's hue at a constant brightness
+  uint16_t bpmColor = connected ? zoneColor(bpm) : display->color565(70, 70, 70);
   char buf[12];
   if (connected) {
     snprintf(buf, sizeof(buf), "%d", bpm);
   } else {
     snprintf(buf, sizeof(buf), "--");
   }
-  display->setTextColor(zColor);
+  display->setTextColor(bpmColor);
   printRightAligned(buf, 63, 3, 2);
 
   // --- Steps
@@ -235,13 +237,23 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
     display->fillRect(x0, LEGEND_Y, x1 - x0, 1, zonePalette(z));
   }
 
-  // --- The live bar, 2px tall, sitting on the legend. It uses the brighter
-  // text palette rather than the legend's, so the needle reads clearly
-  // against the scale it's sitting on even where the two share a color.
+  // --- The live bar, 2px tall, sitting on the legend.
+  //
+  // It's painted in the LEGEND's colors, slice by slice, rather than one flat
+  // color: filling to the middle of the blue zone gives you a run of gray,
+  // then white, then blue. So the bar is literally the legend lit up to where
+  // you are — it thickens from 1px to 3px behind you — and the zone is read
+  // from where the fill STOPS, not from what color it is.
   if (connected) {
     int width = (int)(barFraction(bpm) * PANEL_WIDTH + 0.5f);
     if (width < 1) width = 1; // always show something so it never reads as "off"
-    display->fillRect(0, BAR_TOP_Y, width, 2, zColor);
+    for (int z = 0; z < 5; z++) {
+      int x0 = zoneSliceX(z);
+      if (width <= x0) break;              // fill ended before this slice
+      int x1 = zoneSliceX(z + 1);
+      if (width < x1) x1 = width;          // partial slice: this is the tip
+      display->fillRect(x0, BAR_TOP_Y, x1 - x0, 2, zonePalette(z));
+    }
   }
 
   // Frame complete — show it. With double_buff on, nothing drawn above has
