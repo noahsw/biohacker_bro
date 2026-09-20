@@ -21,13 +21,18 @@
 // ESP32-S3-WROOM-1-N16R8, 16MB/8MB, 2x USB-C, VH-4P 5V/4A out, 2x HUB75,
 // ES7210 + ES8311, SD + PCF85063 RTC). Mapping is that model's wiki table:
 //   https://seengreat.com/wiki/214/rgb-matrix-hub75-s3
-// Note R1/G1 are NOT in the "obvious" order — G1 is the lower GPIO.
+// CORRECTED ON HARDWARE: the wiki's table has G and B transposed. It lists
+// G1=IO4 / B1=IO6 and G2=IO7 / B2=IO17, but with those values a full-screen
+// green renders blue and blue renders green, on both row halves. The values
+// below are the wiki's with G and B swapped, verified against the
+// white/red/green/blue solid test in wokwi_test_hub75. Everything else in
+// that table (R, A-E, CLK, LAT, OE) was correct as published.
 #define R1_PIN  5
-#define G1_PIN  4
-#define B1_PIN  6
+#define G1_PIN  6
+#define B1_PIN  4
 #define R2_PIN  15
-#define G2_PIN  7
-#define B2_PIN  17
+#define G2_PIN  17
+#define B2_PIN  7
 #define A_PIN   8
 #define B_PIN   18
 #define C_PIN   10

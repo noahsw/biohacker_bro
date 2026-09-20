@@ -108,7 +108,14 @@ subsystems:
   -N16R8, 16MB/8MB, 2x USB-C in, VH-4P 5V/4A out, 2x HUB75, ES7210 + ES8311,
   SD + PCF85063 RTC). That model's wiki publishes the GPIO mapping:
   https://seengreat.com/wiki/214/rgb-matrix-hub75-s3 — `config.h` now uses
-  it. One trap: R1=IO5 / G1=IO4, so the lower GPIO is G1, not R1.
+  it, **with one correction made on hardware: the wiki has G and B
+  transposed.** It publishes G1=IO4 / B1=IO6 and G2=IO7 / B2=IO17, but with
+  those values a full-screen green renders blue and blue renders green, on
+  both row halves. `config.h` swaps them. Everything else in that table (R,
+  A-E, CLK, LAT, OE) was correct as published. This error is invisible unless
+  you test named colours — `begin()` succeeds, geometry is perfect, text is
+  legible — so anyone following that page ships with green and blue swapped
+  and no sign anything is wrong.
   `E_PIN` stays -1: E is wired to IO16, but the Waveshare panel is 1/16 scan
   (per its own user guide) and only uses A-D.
 - **Mic I2S pins**: now known from the same wiki (MCLK=38, BCLK=48, WS=21,
