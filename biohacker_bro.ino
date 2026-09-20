@@ -93,5 +93,5 @@ void loop() {
 
   drawMainScreen(currentBPM, hrConnected, stepCount);
 
-  delay(30); // ~30fps-ish refresh of our drawing logic
+  delay(15); // ~60fps, so the heart's brightness envelope stays smooth
 }

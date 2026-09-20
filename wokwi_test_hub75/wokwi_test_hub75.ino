@@ -61,9 +61,11 @@ static void solidColourTest() {
   for (auto &s : screens) {
     LOGPORT.printf("solid test: expecting %s\r\n", s.name);
     display->fillScreen(display->color565(s.r, s.g, s.b));
+    display->flipDMABuffer(); // double buffering is on: nothing shows until the flip
     delay(2000);
   }
   display->clearScreen();
+  display->flipDMABuffer();
 }
 
 static bool beginOk = false;

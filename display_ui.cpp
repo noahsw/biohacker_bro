@@ -8,7 +8,7 @@ MatrixPanel_I2S_DMA *display = nullptr;
 // ============================================================================
 //   x0..21,  y0..28   heart, beating in time with the real BPM
 //   x23..63, y3..17   BPM, size 2, in the current zone's color
-//   x23..63, y21..28  step count, size 1, with a little footprint glyph
+//   x23..63, y21..28  step count, size 1
 //   y29..30           the 2px-tall live HR bar (current zone's color)
 //   y31               the fixed 5-segment zone legend, lit at all times
 // The bar sits directly on top of the legend on purpose: the legend is the
@@ -28,7 +28,10 @@ const int zoneFloor[6] = { 0, ZONE1_BPM, ZONE2_BPM, ZONE3_BPM, ZONE4_BPM, ZONE_M
 uint16_t zonePalette(int zone) {
   switch (zone) {
     case 0:  return display->color565(255, 255, 255); // white
-    case 1:  return display->color565(110, 110, 110); // gray
+    // Deliberately dim: at full-ish gray, Z0 white and Z1 gray were nearly
+    // indistinguishable on the real panel — an LED "gray" is just a dimmer
+    // white, so the two segments need a big brightness gap to read apart.
+    case 1:  return display->color565(55, 55, 55);   // gray
     case 2:  return display->color565(0, 110, 255);   // blue
     case 3:  return display->color565(0, 220, 60);    // green
     default: return display->color565(255, 30, 30);   // red (Z4/5)
@@ -53,15 +56,6 @@ void drawHeart(int cx, int cy, int scale, uint16_t color) {
                          color);
 }
 
-// Two tiny footprints, to label the step count without spending 5 characters
-// of an already-narrow row on the word "STEPS".
-void drawFootprints(int x, int y, uint16_t color) {
-  display->fillRect(x,     y,     2, 3, color); // left foot: sole
-  display->drawPixel(x,     y + 4,    color);   //            toes
-  display->fillRect(x + 3, y + 2, 2, 3, color); // right foot, offset lower
-  display->drawPixel(x + 3, y + 6,    color);
-}
-
 // Draws text ending at `rightEdge` instead of starting at a cursor, so a
 // number stays inside the panel as it gains digits. 6px per char at size 1,
 // scaling linearly with text size.
@@ -72,16 +66,29 @@ void printRightAligned(const char *text, int rightEdge, int y, int textSize) {
   display->print(text);
 }
 
-// How "expanded" the heart is right now, 0.0 (relaxed) to 1.0 (full thump).
-// Modeled as lub-dub rather than a square wave: a sharp contraction that
-// decays over ~180ms, then a smaller second beat, then stillness until the
-// next one. At 60bpm you see a distinct double-thump with a rest; at 170bpm
-// the beats run together into a fast flutter, which is the point.
+// How "contracted" the heart is right now, 0.0 (relaxed) to 1.0 (full thump).
+//
+// This drives BRIGHTNESS, not size. An earlier version scaled the geometry,
+// but the heart is only ~16px across, so the smallest size step available is
+// a 25% jump in width — it popped between two shapes instead of beating. A
+// brightness envelope has 256 steps to work with, so the same envelope reads
+// as a smooth pulse. The heart never goes fully dark (see the 0.35 floor in
+// drawMainScreen): it glows and surges rather than blinking.
+//
+// Shape is lub-dub: a sharp contraction decaying over ~150ms, then a smaller
+// second beat around 280ms, then quiet until the next one. At 60bpm you see a
+// distinct double-thump with a rest; by 170bpm they merge into a flutter,
+// which is the honest thing for it to do.
+float expDecay(float tMs, float tauMs) {
+  if (tMs < 0.0f) return 0.0f;
+  return expf(-tMs / tauMs);
+}
+
 float beatIntensity() {
-  unsigned long sinceBeat = millis() - lastBeatTime;
-  if (sinceBeat < 180) return 1.0f - (sinceBeat / 180.0f);          // lub
-  if (sinceBeat < 300) return 0.5f - ((sinceBeat - 180) / 240.0f);  // dub
-  return 0.0f;
+  float t = (float)(millis() - lastBeatTime);
+  float i = expDecay(t, 150.0f) + 0.45f * expDecay(t - 280.0f, 120.0f);
+  if (i > 1.0f) i = 1.0f;
+  return i;
 }
 
 // Fraction (0..1) of the way along the FULL bar for this BPM: each zone owns
@@ -114,6 +121,19 @@ uint16_t zoneColor(int bpm) {
 
 bool displaySetup() {
   HUB75_I2S_CFG mxconfig(PANEL_WIDTH, PANEL_HEIGHT, PANEL_CHAIN);
+  // Two fixes for visible flicker, which had two separate causes:
+  //  - Tearing: we clear and redraw the whole frame every loop, and with a
+  //    single buffer the panel was scanning out half-drawn frames. Double
+  //    buffering means the panel only ever shows a finished frame; we draw
+  //    into the back one and flip at the end of drawMainScreen().
+  //  - Refresh: the library defaults to an 8MHz pixel clock and a 60Hz
+  //    minimum, which is low enough to beat visibly against both eyes and
+  //    camera shutters. 16MHz gives enough headroom for 120Hz at full colour
+  //    depth. If this ever shows ghosting or colour fringing on the panel,
+  //    back HUB75_CLOCK_HZ down to HZ_8M first, then drop the refresh rate.
+  mxconfig.double_buff = true;
+  mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_16M;
+  mxconfig.min_refresh_rate = 120;
   mxconfig.gpio.r1 = R1_PIN;
   mxconfig.gpio.g1 = G1_PIN;
   mxconfig.gpio.b1 = B1_PIN;
@@ -156,12 +176,17 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
 
   uint16_t zColor = connected ? zoneColor(bpm) : display->color565(60, 60, 60);
 
-  // --- Heart: always red (it's a heart), but dimmed while we're still
-  // hunting for the strap so a stale reading can't look live.
-  uint16_t heartColor = connected ? display->color565(255, 20, 20)
-                                  : display->color565(50, 0, 0);
-  int scale = connected ? 3 + (int)(beatIntensity() + 0.5f) : 3;
-  drawHeart(11, 12, scale, heartColor);
+  // --- Heart: always red (it's a heart), pulsing in brightness on each beat.
+  // Dimmed to a dark ember while we're still hunting for the strap, so a
+  // stale reading can never look live.
+  uint16_t heartColor;
+  if (connected) {
+    float level = 0.35f + 0.65f * beatIntensity();
+    heartColor = display->color565((int)(255 * level), (int)(20 * level), (int)(20 * level));
+  } else {
+    heartColor = display->color565(50, 0, 0);
+  }
+  drawHeart(11, 12, 4, heartColor);
 
   // --- BPM, in the current zone's color
   char buf[12];
@@ -177,10 +202,6 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
   uint16_t stepColor = display->color565(0, 180, 255);
   display->setTextColor(stepColor);
   snprintf(buf, sizeof(buf), "%lu", steps);
-  // The glyph lives in x24..29 and the number is right-aligned to 63, so it
-  // only fits alongside up to 5 digits. Past 99,999 steps, drop the glyph
-  // rather than let the number collide with it.
-  if (strlen(buf) <= 5) drawFootprints(24, 21, stepColor);
   printRightAligned(buf, 63, 21, 1);
 
   // --- Zone legend: the fixed scale along the very bottom row, lit whether
@@ -197,6 +218,10 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
     if (width < 1) width = 1; // always show something so it never reads as "off"
     display->fillRect(0, BAR_TOP_Y, width, 2, zColor);
   }
+
+  // Frame complete — show it. With double_buff on, nothing drawn above has
+  // been visible until this call.
+  display->flipDMABuffer();
 }
 
 void drawStepsScreen(unsigned long steps) {
@@ -209,6 +234,7 @@ void drawStepsScreen(unsigned long steps) {
   display->setTextSize(2);
   display->setCursor(2, 16);
   display->print(steps);
+  display->flipDMABuffer();
 }
 
 void drawDbScreen(int dbLevel) {
@@ -223,4 +249,5 @@ void drawDbScreen(int dbLevel) {
   int barWidth = map(dbLevel, 0, 100, 0, 60);
   display->fillRect(2, 18, barWidth, 8, color);
   display->drawRect(2, 18, 60, 8, display->color565(80, 80, 80));
+  display->flipDMABuffer();
 }
