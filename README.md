@@ -220,6 +220,24 @@ fine, `begin()` returns true, and the firmware loops happily, because nothing
 downstream reports back. Cost a full debug session; check this first if the
 panel is dark.
 
+**This panel clocks data in on the NEGATIVE edge — set `mxconfig.clkphase =
+false`.** The library defaults to the positive edge. With the default, the
+whole image sat one pixel to the left, which is invisible everywhere except at
+the wrap: the last column (x=63) showed the *next row's* first pixel instead
+of its own. It presented as a few faint, unidentifiable dots in the
+bottom-right corner where a solid red legend segment should have been. Worth
+knowing because the symptom looks like dying LEDs or electrical noise, not
+like a timing setting — if a single edge column ever looks wrong, suspect this
+before suspecting the panel.
+
+**Flicker had two causes, both in `displaySetup()`.** Redrawing the whole frame
+each loop into a single buffer meant the panel scanned out half-drawn frames;
+`mxconfig.double_buff = true` plus a `flipDMABuffer()` at the end of each draw
+fixes the tearing. Separately, the library's 8MHz/60Hz defaults beat visibly
+against both eyes and camera shutters — now `HZ_16M` with `min_refresh_rate =
+120`. If ghosting (faint duplicate rows) ever appears, that 16MHz is the first
+thing to back off, then `setLatBlanking(2)`.
+
 **Bring-up diagnostics live in `wokwi_test_hub75/`.** Set `SOLID_TEST_ONLY 1`
 to loop a full-screen white/red/green/blue cycle forever and reprint the pin
 table each pass. Two reasons it exists: it removes all the pixel-art drawing

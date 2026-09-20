@@ -160,6 +160,13 @@ bool displaySetup() {
   mxconfig.double_buff = true;
   mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_16M;
   mxconfig.min_refresh_rate = 120;
+  // This panel clocks data in on the NEGATIVE edge. With the library's default
+  // (positive), everything landed one pixel to the left, so the last column
+  // showed the next row's first pixel instead of its own — visible as faint
+  // unidentifiable dots at x=63 where the red Z4 legend slice should have
+  // been. Everything else lined up, because a 1px shift is invisible until it
+  // wraps at the panel edge.
+  mxconfig.clkphase = false;
   mxconfig.gpio.r1 = R1_PIN;
   mxconfig.gpio.g1 = G1_PIN;
   mxconfig.gpio.b1 = B1_PIN;
