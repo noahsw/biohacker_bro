@@ -45,24 +45,59 @@
 #define OE_PIN  13
 #define CLK_PIN 12
 
-// --- 3. MPU6050 (accelerometer) — confirmed pins from earlier in build ---
-#define MPU_SDA 45
-#define MPU_SCL 46
+// --- 3. MPU6050 (accelerometer) — on the I2C EXPANSION CONNECTOR, not IO45/46 ---
+// Moved from IO45/IO46 to IO1/IO2 for one reason: no soldering. The board's
+// IO45/IO46 breakout is bare plated through-holes — no pin header, no socket,
+// nothing a jumper wire can grip — so using it means soldering both the board
+// and the GY-521 (which also ships with its header loose). The white 4-pin
+// 1mm-pitch connector on the left edge, next to the USB-C ports, is a real
+// plug-in connector carrying the same I2C bus on IO1/IO2. Vendor wiki:
+//   https://seengreat.com/wiki/214/rgb-matrix-hub75-s3
+//
+// TRAP — the connector's pin order is NOT the Qwiic/STEMMA QT order. The
+// silkscreen reads, top to bottom:
+//   3V3, GND, IO1 (SDA), IO2 (SCL)
+// Qwiic/STEMMA QT is GND, V+, SDA, SCL — power and ground transposed. The
+// housings are the same 1mm JST-SH, so a standard Qwiic-to-Qwiic cable mates
+// perfectly and feeds 3.3V into the sensor's GND. Seengreat never claimed
+// Qwiic compatibility (their wiki just calls it an "I2C expansion connector"),
+// so this is two conventions sharing a plug, not a vendor error — but it
+// destroys a sensor just the same.
+//
+// Hence the wiring uses a JST-SH-to-loose-female-sockets cable, so each wire
+// is placed on the GY-521 by FUNCTION rather than by connector position. And
+// before the sensor is ever attached: plug the cable into a powered board and
+// meter which wire is +3.3V and which is 0V. SDA/SCL swapped just means the
+// sensor doesn't enumerate; VCC/GND swapped means a dead sensor.
+//
+// Unlike IO45/IO46, this bus is SHARED with the onboard peripherals (PCF85063
+// RTC, ES7210, ES8311, PCA9557). The MPU6050 answers at 0x68 with ADO left
+// floating, which none of those use. steps_bringup/ scans the bus and prints
+// every address found, so confirm rather than assume.
+#define MPU_SDA 1
+#define MPU_SCL 2
 
-// --- 4. Mic I2S pins — from the same vendor wiki (ES7210 ADC side) ---
-// The ES7210 (mic ADC) and ES8311 (speaker codec) share one I2S bus:
-//   MCLK=IO38, SCLK/BCLK=IO48, LRCK/WS=IO21, DSDIN(to speaker)=IO14,
-//   SDOUT(from mics)=IO47
-// We only want to LISTEN, so DATA_IN is SDOUT. Still unverified on hardware,
-// and the ES7210 likely needs I2C register init before it outputs anything —
-// hence MIC_CONFIGURED stays false until it's actually tested.
-#define MIC_MCLK_PIN  38
-#define MIC_BCLK_PIN  48
-#define MIC_WS_PIN    21
-#define MIC_DATA_PIN  47
-#define MIC_CONFIGURED false  // flip to true once real audio is confirmed
+// --- 4. (was the mic) ---
+// The decibel meter was cut: it wants to be a bar, the bottom rows are
+// already a bar, and two bars on a 32px-tall panel compete for the same read.
+// The I2S pin mapping that was here (MCLK=38, BCLK=48, WS=21, mic SDOUT=47,
+// speaker DSDIN=14) was never verified on hardware and the ES7210 still needs
+// I2C register init before it would stream anything. It's preserved in git
+// history and in the README's "What got cut" section rather than sitting here
+// as dead defines.
 
-// --- 5. HR zone thresholds (BPM) ---
+// --- 5. Step count head start ---
+// The wearer does not arrive at the party having taken zero steps, and a
+// chest display reading "0 STEPS" at 9pm undercuts the joke. Steps counted
+// during the night are ADDED to this.
+//
+// This is a prop offset, not a measurement, and it is the honest place to say
+// so: the number on the panel is this constant plus a jolt count from a
+// threshold detector that cannot tell dancing from walking. Set it to 0 if
+// you ever want the raw count.
+#define STEP_COUNT_START 5000
+
+// --- 6. HR zone thresholds (BPM) ---
 // Calibrated to the actual wearer, not to a generic training chart: resting
 // HR is 55 and hard dancing peaks around 110. A stock chart would put 110 in
 // zone 1 and the bar would sit dead-left all night.

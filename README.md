@@ -11,12 +11,27 @@ stats** on a chest-worn RGB LED matrix:
   with the real heart rate, color-coded by zone (green/yellow/red)
 - **Step count** — counted in real time from an onboard accelerometer
   (independent of the Whoop — Whoop doesn't expose steps over BLE)
-- **"Party volume"** — a relative loudness meter from the board's onboard
-  microphone (not a calibrated SPL/decibel meter — just a fun relative bar)
+- **HR zone bar** — a live bar along the top two rows, sitting under a
+  fixed 5-segment zone legend, so the zone reads from where the fill stops
 
-The display cycles between these three screens automatically every few
-seconds. This is a costume prop, not a medical device — the goal is
-"funny and easily readable across a room," not accuracy.
+**All of it on one screen, at once — the display does not rotate.** A costume
+gets about one second of a stranger's attention, and a cycling display
+guarantees that second lands on the wrong screen. See the comment above
+`setup()` in `biohacker_bro.ino`, and the pixel budget in `display_ui.cpp`.
+
+It reads at two distances on purpose: the heart, the BPM digits and the zone
+bar carry across a room, while the step count is small enough that it rewards
+someone who comes closer. That's deliberate, not a compromise.
+
+**The gauge sits directly above the heart rate, not at the bottom.** The bar
+*is* the heart rate — the same number the digits show, placed on a scale — and
+adjacency is the only thing on a 64×32 panel that says which number a gauge
+belongs to. At the bottom it sat under the step count, which put a value and
+its own gauge on opposite sides of an unrelated number and invited reading it
+as a steps progress meter.
+
+This is a costume prop, not a medical device — the goal is "funny and easily
+readable across a room," not accuracy.
 
 ## Why it's built this way (context for future-me / Claude Code)
 
@@ -32,11 +47,10 @@ seconds. This is a costume prop, not a medical device — the goal is
 
 | Part | Model | Notes |
 |---|---|---|
-| Microcontroller | WatangTech ESP32-S3 HUB75 RGB Matrix Controller | ESP32-S3-WROOM-1-N16R8: dual-core, 16MB flash, 8MB **Octal** PSRAM, WiFi + BLE 5. Has onboard ES7210 mic codec (unused for now), PCF85063 RTC, SD slot — none of that is used by this project except the mic. |
+| Microcontroller | WatangTech ESP32-S3 HUB75 RGB Matrix Controller | ESP32-S3-WROOM-1-N16R8: dual-core, 16MB flash, 8MB **Octal** PSRAM, WiFi + BLE 5. Has an onboard ES7210 mic codec, PCF85063 RTC and SD slot, none of which this project uses. |
 | Display | Waveshare RGB Matrix Panel, 2.5mm pitch, 64×32 pixels | HUB75 interface, connects via included ribbon cable. Wants 5V, 2.5A minimum / 4A recommended for full brightness. |
 | Heart rate source | Whoop strap | HR Broadcast mode enabled in the Whoop app — broadcasts the **standard Bluetooth Heart Rate Service (0x180D)**, same protocol used by gym equipment. Whoop does NOT expose steps, HRV, recovery, etc. over this BLE service — only HR. |
-| Accelerometer (steps) | GY-521 breakout (MPU-6050) | 3–5V tolerant onboard regulator. Wired to VCC (3.3V), GND, SDA→IO45, SCL→IO46. |
-| Mic | Onboard ES7210 codec + dual mics | Already on the main board. I2S pins **not yet confirmed** — see Known Unknowns. |
+| Accelerometer (steps) | GY-521 breakout (MPU-6050), **pre-soldered headers** | Buy the pre-soldered kind. Plugs into the board's 4-pin I2C expansion connector (IO1/IO2) via a JST-SH-to-female-sockets cable — no soldering anywhere. Run it at **3.3V**, never 5V. |
 | Power | Anker 537 PowerCore 24K (24,000mAh) | Two USB-C ports feed the controller board's **two** USB-C inputs, which are separate rails ("Board" + "Panel"). The panel is then fed from the board's **VH-4P (3.96mm) 5V/4A output** — that is the board's designed panel path, and it keeps the panel's current off the ESP32's rail. The panel asks 5V/2.5A min via its VH4 header, so the 4A output covers it. At plain 5V (not higher PD voltages) each Anker port maxes around 3A (~15W). Estimated runtime well beyond the 5-hour party (see calc below). |
 
 **Runtime estimate:** 24,000mAh × 3.7V ≈ 88.8Wh, ~75-80Wh usable after
@@ -48,19 +62,51 @@ hour and checking the power bank's remaining charge.
 
 ## Wiring
 
-**MPU6050 → ESP32-S3 board:**
-| MPU6050 pin | ESP32-S3 pin |
-|---|---|
-| VCC | 3.3V |
-| GND | GND |
-| SDA | IO45 |
-| SCL | IO46 |
-| XDA, XCL, ADO, INT | not connected |
+**MPU6050 → ESP32-S3 board:** via the white 4-pin 1mm-pitch **I2C expansion
+connector** on the left edge of the board, beside the USB-C ports — *not* the
+`3V3 GND IO46 IO45` breakout along the bottom edge.
 
-IO45/IO46 are also "strapping pins" on the ESP32-S3 (used briefly during
-boot mode selection). In practice this is usually fine once the board is
-running, but if boot ever becomes unreliable with the sensor attached,
-this is the first thing to investigate.
+| Connector pin (top→bottom) | MPU6050 pin |
+|---|---|
+| 3V3 | VCC |
+| GND | GND |
+| IO1 (SDA) | SDA |
+| IO2 (SCL) | SCL |
+| — | XDA, XCL, ADO, INT: not connected |
+
+**Why not IO45/IO46, which the bottom breakout exposes and which this project
+originally used?** Because that breakout is *bare plated through-holes* — no
+pin header, no socket, nothing a jumper wire can grip. Using it means
+soldering the board as well as the GY-521 (whose header also ships loose in
+the bag), and this build is no-solder by requirement. The expansion connector
+carries the same I2C peripheral on a connector you can actually plug into.
+Easy to miss from photos, since the bottom breakout is labelled so invitingly.
+
+**The cable is a JST-SH to four loose female sockets**, not a Qwiic-to-Qwiic
+cable, and that is deliberate — see the trap below.
+
+⚠️ **This connector is not wired in Qwiic order, and a Qwiic cable will
+destroy the sensor.** The silkscreen reads `3V3, GND, IO1, IO2` top to bottom.
+Qwiic / STEMMA QT is `GND, V+, SDA, SCL` — power and ground transposed. Both
+use the same 1mm JST-SH housing, so a standard Qwiic-to-Qwiic cable plugs in
+with a satisfying latch and puts 3.3V on the sensor's ground pin. Seengreat
+never claimed Qwiic compatibility (their wiki just calls it an "I2C expansion
+connector"), so this is two conventions sharing a plug rather than a vendor
+mistake — which makes it no less destructive. Loose sockets let you place each
+wire by *function*, sidestepping the whole question.
+
+**Meter the cable before the sensor is ever attached.** Plug the cable into a
+powered board with nothing on the far end and check which wire is +3.3V and
+which is 0V. Do not trust the wire colours: they follow the cable maker's
+Qwiic convention, not this board's pin order, so on this connector the black
+wire is sitting on 3V3 and the red on GND. Getting SDA/SCL backwards is
+harmless — the sensor simply won't enumerate and the scanner in
+`steps_bringup/` will say so. Getting VCC/GND backwards kills it in seconds.
+
+**This bus is shared.** Unlike IO45/IO46, IO1/IO2 also carry the onboard
+PCF85063 RTC, ES7210, ES8311 and PCA9557. The MPU6050 answers at `0x68` with
+ADO floating, which none of those claim, so there's no conflict — but
+`steps_bringup/` prints every address it finds, so confirm rather than assume.
 
 **HUB75 panel → ESP32-S3 board:** connects via the included ribbon cable
 between the board's HUB75 header and the panel's **"IN"** port (the panel's
@@ -88,17 +134,39 @@ subsystems:
    library), computes acceleration magnitude, and counts a step whenever
    the magnitude deviates from the ~1g baseline past a threshold, with a
    debounce window to avoid double-counting.
-3. **Decibel/mic level** — I2S pins are now known but untested, and the
-   ES7210 still needs register init, so this remains a placeholder that
-   outputs a fake wobble (see Known Unknowns) rather than real audio. The
-   rest of the system is not blocked on it.
-4. **Display rendering** — `ESP32-HUB75-MatrixPanel-I2S-DMA` library
+3. **Display rendering** — `ESP32-HUB75-MatrixPanel-I2S-DMA` library
    (Arduino Library Manager listing name: **"ESP32 HUB75 LED MATRIX PANEL
    DMA Display"** by MrCodetastic — the GitHub repo was renamed from
    `-I2S-DMA` to `-DMA`, which is why searching the old name in Library
-   Manager returns nothing). Draws a pixel-art heart that scales slightly
-   on each beat (timed from real BPM), zone-colored, plus BPM/steps/dB
-   text screens that cycle every 4 seconds.
+   Manager returns nothing). Draws one fixed layout: a pixel-art heart
+   pulsing in brightness on each beat (timed from real BPM), the BPM in
+   the current zone's hue, the step count, and the zone bar + legend.
+   `drawStepsScreen()` / `drawDbScreen()` survive only for the isolated
+   test sketches and are not used by the firmware.
+
+## What got cut
+
+**The decibel / "party volume" meter.** It was never drawn on the real
+layout and is now removed from the code entirely (`mic.cpp`, `mic.h`,
+`drawDbScreen()`, the `MIC_*` pins). Three reasons, in order of weight:
+
+1. **No room.** 64×32 is ten characters of size-1 text per row. The step row
+   already uses 60 of its 64 pixels once it's labelled; there is no second
+   row to give away.
+2. **It wants to be a bar, and the bar is taken.** Two bars on a 32px-tall
+   panel compete for the same read, and neither wins.
+3. **It isn't a longevity metric.** Loudness is a party gimmick, which
+   dilutes the quantified-self joke the costume is making.
+
+It was also the only subsystem never verified on hardware. The I2S pin
+mapping worked out from the vendor wiki — **MCLK=IO38, BCLK/SCLK=IO48,
+LRCK/WS=IO21, mic SDOUT=IO47, speaker DSDIN=IO14** — is recorded here so the
+research isn't lost, but it was never tested, and the ES7210 needs I2C
+register init before it would stream anything at all.
+
+If ambient sound ever earns a place, the promising route is one that costs no
+pixels: let loudness drive overall panel brightness or a background pulse, so
+the display breathes with the room rather than showing a number.
 
 ## Known unknowns / TODOs (be upfront about these — don't guess silently)
 
@@ -118,13 +186,15 @@ subsystems:
   and no sign anything is wrong.
   `E_PIN` stays -1: E is wired to IO16, but the Waveshare panel is 1/16 scan
   (per its own user guide) and only uses A-D.
-- **Mic I2S pins**: now known from the same wiki (MCLK=38, BCLK=48, WS=21,
-  mic data in / SDOUT=47), but untested — and the ES7210 almost certainly
-  needs I2C register setup before it streams anything, so `MIC_CONFIGURED`
-  stays `false` until real audio is confirmed.
 - **Step detection threshold** (`STEP_THRESHOLD` in code): a starting
   guess. Needs real-world tuning once worn, since stride and mounting
-  position affect it.
+  position affect it. `steps_bringup/` exists to make that tuning
+  measurable rather than a bisection search — see below.
+- **The MPU6050 has not been run on real hardware yet.** The move to the
+  I2C expansion connector (IO1/IO2) is reasoned from the vendor wiki and
+  the board's own silkscreen, not yet confirmed by a sensor that
+  enumerated. The bus assignment, the 0x68 address being free, and the
+  pin order all want confirming on first power-up.
 
 ## Testing approach
 
@@ -142,6 +212,51 @@ was split:
   it is NOT the real firmware, just a logic-testing harness.
 - **BLE/Whoop connection and MAC filtering** could not be tested until
   real hardware + the real Whoop strap were both available.
+
+### Seeing the layout on the panel (`wokwi_test_display_steps/`)
+
+Draws the real `drawMainScreen()` with a **simulated** BPM sweeping the full
+zone range, so the actual layout can be checked on the actual panel with no
+Whoop in range and no accelerometer attached (steps just stay at 0, and the
+serial line says `mpu=ABSENT`). This is the sketch to flash while iterating on
+the design.
+
+It used to call `drawStepsScreen()`, which meant the one sketch whose job is
+previewing the display never drew the layout the costume actually uses. Worse,
+`--gc-sections` then dropped `drawMainScreen()` from the binary entirely, so
+the compiled size didn't move when the layout changed — a quiet way to believe
+a change is covered when nothing links it.
+
+```bash
+FQBN="esp32:esp32:esp32s3:CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=app3M_fat9M_16MB"
+arduino-cli upload -b "$FQBN" -p /dev/cu.usbmodem201101 wokwi_test_display_steps
+```
+
+### Step counter bring-up (`steps_bringup/`)
+
+Real-hardware counterpart to `wokwi_test_steps/`, which is simulator-only.
+It answers the two questions bring-up actually asks:
+
+1. **Is the sensor on the bus at all?** It scans I2C and prints every address
+   it finds. You want `0x68`, alongside the onboard chips that share IO1/IO2.
+2. **What should `STEP_THRESHOLD` be?** It prints the peak acceleration delta
+   since the last line — the exact quantity `steps.cpp` compares against. Hold
+   the sensor still to read the noise floor, walk twenty steps to read the per-
+   step peak, and put the threshold between them. Beats guessing and reflashing.
+
+Both print from `loop()`, not `setup()`, and the scan repeats every pass: USB-CDC
+re-enumerates on reset so `setup()` output is usually gone before a capture
+attaches, and repeating lets you reseat a connector and watch the address appear
+without reflashing.
+
+```bash
+FQBN="esp32:esp32:esp32s3:CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=app3M_fat9M_16MB"
+arduino-cli upload -b "$FQBN" -p /dev/cu.usbmodem201101 steps_bringup
+stty -f /dev/cu.usbmodem201101 115200 raw && cat /dev/cu.usbmodem201101
+```
+
+Mount the sensor where it will actually ride on the costume before tuning —
+chest versus pocket moves these numbers a lot.
 
 ## Host-side tests
 
@@ -211,12 +326,22 @@ arduino-cli upload  -b "$FQBN" -p /dev/cu.usbmodem201101 wokwi_test_hub75
 Find the port with `arduino-cli board list`. That FQBN encodes the same
 settings as the IDE's Tools menu, so keep the two in sync.
 
-To watch serial, note that `arduino-cli monitor` did not reliably capture
-this board's USB-CDC output; reading the device directly did:
+To watch serial, use the helper:
 
 ```
-stty -f /dev/cu.usbmodem201101 115200 raw && cat /dev/cu.usbmodem201101
+python3 tools/serial_monitor.py            # Ctrl-C to stop
+python3 tools/serial_monitor.py /dev/cu.usbmodem201101 10   # or capture 10s
 ```
+
+**Neither `arduino-cli monitor` nor `stty ... raw && cat` works on this
+board** — both were tried and both print absolutely nothing while the sketch
+is running normally, which is indistinguishable from a crashed sketch and will
+send you debugging the wrong thing. (An earlier version of this README
+recommended the `cat` form. It does not work.)
+
+The reason is that the ESP32-S3's native USB-CDC only starts emitting once the
+host asserts **DTR**, and neither of those tools raises it. `tools/serial_monitor.py`
+opens the port and raises DTR first; that is the entire difference.
 
 ## Gotchas found on real hardware
 

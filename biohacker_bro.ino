@@ -6,15 +6,15 @@
     - WatangTech ESP32-S3 HUB75 RGB Matrix Controller
     - Waveshare 64x32 RGB LED Matrix Panel (HUB75, 2.5mm pitch)
     - Whoop strap (HR Broadcast enabled in Whoop app) — read via BLE
-    - GY-521 (MPU-6050) accelerometer — wired to IO45 (SDA) / IO46 (SCL)
-    - Onboard mic (ES7210 codec) — for relative decibel level
+    - GY-521 (MPU-6050) accelerometer — on the I2C expansion connector,
+      IO1 (SDA) / IO2 (SCL). NOT IO45/IO46; see config.h for why.
 
   What this does:
     - Connects ONLY to your specific Whoop (filtered by MAC address, so it
       ignores anyone else's Whoop broadcasting nearby at the party)
     - Shows ONE fixed screen (no cycling): live BPM in your current HR
       zone's color, a heart icon beating in time with your actual heart
-      rate, a step count, and a zone bar along the bottom two rows over a
+      rate, a step count, and a zone bar along the top two rows under a
       permanently-lit 5-segment zone legend
     - Counts steps in real time using the accelerometer
 
@@ -23,8 +23,6 @@
     - config.h          — all pins/constants you may need to edit
     - ble_heart_rate.*   — Whoop BLE heart-rate client
     - steps.*            — MPU6050 step counting
-    - mic.*              — decibel/mic level (sampled but no longer shown;
-                           kept for a future ambient-reactive effect)
     - display_ui.*       — HUB75 panel setup + the main screen layout
   See wokwi_test_ble/ and wokwi_test_display_steps/ for smaller sketches that
   simulate just one subsystem at a time (they reuse these same files via
@@ -63,7 +61,6 @@
 #include "config.h"
 #include "ble_heart_rate.h"
 #include "steps.h"
-#include "mic.h"
 #include "display_ui.h"
 
 // ============================================================================
@@ -81,17 +78,43 @@ void setup() {
 
   displaySetup();
   stepSetup();
-  micSetup();
   bleSetup();
 }
 
 void loop() {
   bleLoop();
   stepLoop();
-  micLoop(); // still sampled so the mic subsystem stays warm; not displayed
   updateHeartbeatPhase(currentBPM);
 
   drawMainScreen(currentBPM, hrConnected, stepCount);
+
+  // Periodic status line. The BLE client only logs on failure or disconnect,
+  // so without this a silent serial port means either "scanning happily" or
+  // "connected and working" and there is no way to tell them apart.
+  //
+  // Printed from loop() rather than setup() because USB-CDC re-enumerates on
+  // reset, so a monitor attaching afterwards has already missed setup().
+  // Watch it with tools/serial_monitor.py (plain `cat` won't raise DTR).
+  // beatMin/beatMax bracket the heartbeat envelope over the whole reporting
+  // window, not a single sample: one instantaneous reading can't distinguish
+  // "flat" from "caught between beats", which is the exact question.
+  static unsigned long lastStatus = 0;
+  static float beatMin = 1.0f, beatMax = 0.0f;
+  static unsigned long frames = 0;
+  float lvl = heartBeatLevel();
+  if (lvl < beatMin) beatMin = lvl;
+  if (lvl > beatMax) beatMax = lvl;
+  frames++;
+
+  if (millis() - lastStatus > 2000) {
+    unsigned long dt = millis() - lastStatus;
+    Serial.printf("hr=%-9s bpm=%3d  steps=%lu  mpu=%s  beat=%.2f..%.2f  fps=%lu\r\n",
+                  hrConnected ? "CONNECTED" : "scanning", currentBPM, stepCount,
+                  stepSensorOk() ? "ok" : "ABSENT", beatMin, beatMax,
+                  dt ? frames * 1000UL / dt : 0);
+    lastStatus = millis();
+    beatMin = 1.0f; beatMax = 0.0f; frames = 0;
+  }
 
   delay(15); // ~60fps, so the heart's brightness envelope stays smooth
 }
