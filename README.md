@@ -159,6 +159,26 @@ was split:
    the SessionStart hook in `.claude/settings.json` creates that symlink
    automatically. See `secrets.h.example`.
 
+## Building and flashing from the command line
+
+Faster than the IDE for iterating, and it is how the board was brought up:
+
+```
+FQBN="esp32:esp32:esp32s3:CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=app3M_fat9M_16MB"
+arduino-cli compile -b "$FQBN" wokwi_test_hub75
+arduino-cli upload  -b "$FQBN" -p /dev/cu.usbmodem201101 wokwi_test_hub75
+```
+
+Find the port with `arduino-cli board list`. That FQBN encodes the same
+settings as the IDE's Tools menu, so keep the two in sync.
+
+To watch serial, note that `arduino-cli monitor` did not reliably capture
+this board's USB-CDC output; reading the device directly did:
+
+```
+stty -f /dev/cu.usbmodem201101 115200 raw && cat /dev/cu.usbmodem201101
+```
+
 ## Gotchas found on real hardware
 
 **The Whoop connects, but the bundled ESP32 BLE library says it failed.**
@@ -184,6 +204,42 @@ failure rather than guessing:
 - It is not a connectability or address-type problem. The strap
   advertises `advType=0 CONN_ADV` with `addrType=1` (random static), and
   the library handles that correctly.
+
+**The panel's data input is J2, not J1.** The Waveshare panel has two HUB75
+headers, one input and one output for chaining, and on this panel the input is
+the one silkscreened **J2**. J1 is the output. Plugging into J1 gives a
+completely blank panel with no error of any kind — the driver initializes
+fine, `begin()` returns true, and the firmware loops happily, because nothing
+downstream reports back. Cost a full debug session; check this first if the
+panel is dark.
+
+**Bring-up diagnostics live in `wokwi_test_hub75/`.** Set `SOLID_TEST_ONLY 1`
+to loop a full-screen white/red/green/blue cycle forever and reprint the pin
+table each pass. Two reasons it exists: it removes all the pixel-art drawing
+logic from the picture when the panel is misbehaving, and because it repeats
+forever you can move cables and watch the result live instead of reflashing
+between attempts. A swapped RGB pin shows up immediately, since each screen
+announces the colour it is supposed to be. Set back to 0 when done.
+
+**Serial logging picks its port at compile time.** Under Wokwi the serial
+monitor watches UART0 (`Serial0`); on real hardware built with
+`CDCOnBoot=cdc`, the port the Mac sees is `Serial` (native USB-CDC) and
+`Serial0` goes to GPIO43/44, which isn't wired to USB. Logging to the wrong
+one is *silent*, not an error, which is a confusing way to lose a bring-up
+session. The sketch now selects automatically on `ARDUINO_USB_CDC_ON_BOOT`.
+
+**Catching boot-time serial output over USB-CDC is racy.** The port
+re-enumerates on reset, so a capture started after the reset has already
+missed `setup()`. Either reprint diagnostics from `loop()` (what
+`SOLID_TEST_ONLY` does) or accept that you will miss the first lines.
+
+**The test sketches need their own `secrets.h` symlink.** `config.h` includes
+`secrets.h`, and the preprocessor resolves that relative to the directory it
+found `config.h` in — so symlinking only `config.h` into a `wokwi_test_*/`
+dir makes every one of those sketches fail to compile with
+`fatal error: secrets.h: No such file or directory`. Each test dir needs
+`secrets.h -> ../secrets.h` alongside it. `.gitignore` matches `secrets.h` at
+any depth, so these symlinks are correctly ignored.
 
 **`find_whoop_mac/` still uses the bundled BLE library**, which is fine —
 scanning works there and the two libraries are only a problem if a single

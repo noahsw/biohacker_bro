@@ -25,9 +25,19 @@ void drawHeart(int cx, int cy, int scale, uint16_t color) {
                          color);
 }
 
+// Draws text ending at `rightEdge` instead of starting at a cursor, so a
+// number stays inside the panel as it gains digits. 6px per char at size 1,
+// scaling linearly with text size.
+void printRightAligned(const char *text, int rightEdge, int y, int textSize) {
+  int width = strlen(text) * 6 * textSize;
+  display->setTextSize(textSize);
+  display->setCursor(rightEdge - width, y);
+  display->print(text);
+}
+
 } // namespace
 
-void displaySetup() {
+bool displaySetup() {
   HUB75_I2S_CFG mxconfig(PANEL_WIDTH, PANEL_HEIGHT, PANEL_CHAIN);
   mxconfig.gpio.r1 = R1_PIN;
   mxconfig.gpio.g1 = G1_PIN;
@@ -45,9 +55,16 @@ void displaySetup() {
   mxconfig.gpio.clk = CLK_PIN;
 
   display = new MatrixPanel_I2S_DMA(mxconfig);
-  display->begin();
+  bool ok = display->begin();
   display->setBrightness8(90); // 0-255, tune for how bright you want it all night
+  // The panel is 64px wide = 10 chars at size 1, 5 chars at size 2. Adafruit
+  // GFX wraps overflowing text onto a second line by default, which on a 32px
+  // panel means a stray letter alone on the row below. Truncate instead; the
+  // layouts below are sized to fit, and this keeps a mistake from looking
+  // like a rendering bug.
+  display->setTextWrap(false);
   display->clearScreen();
+  return ok;
 }
 
 void updateHeartbeatPhase(int bpm) {
@@ -63,20 +80,21 @@ void updateHeartbeatPhase(int bpm) {
 void drawHRScreen(int bpm, bool connected) {
   display->clearScreen();
   uint16_t color = connected ? zoneColor(bpm) : display->color565(60, 60, 60);
-  int scale = beatPhase ? 6 : 5; // slight pulse on the beat
-  drawHeart(16, 14, scale, color);
+
+  // Heart sits left, slightly smaller than before so a 3-digit BPM still fits
+  // beside it: scale 5 spans x=1..21, leaving x=26..62 for text.
+  int scale = beatPhase ? 5 : 4; // slight pulse on the beat
+  drawHeart(11, 14, scale, color);
 
   display->setTextColor(color);
-  display->setCursor(34, 8);
-  display->setTextSize(2);
+  char buf[8];
   if (connected) {
-    display->print(bpm);
+    snprintf(buf, sizeof(buf), "%d", bpm);
   } else {
-    display->print("--");
+    snprintf(buf, sizeof(buf), "--");
   }
-  display->setTextSize(1);
-  display->setCursor(34, 24);
-  display->print(connected ? "BPM" : "search");
+  printRightAligned(buf, 62, 8, 2);
+  printRightAligned(connected ? "BPM" : "SCAN", 62, 24, 1);
 }
 
 void drawStepsScreen(unsigned long steps) {
@@ -85,7 +103,7 @@ void drawStepsScreen(unsigned long steps) {
   display->setTextColor(color);
   display->setTextSize(1);
   display->setCursor(2, 4);
-  display->print("STEPS TODAY");
+  display->print("STEPS");
   display->setTextSize(2);
   display->setCursor(2, 16);
   display->print(steps);
@@ -97,7 +115,7 @@ void drawDbScreen(int dbLevel) {
   display->setTextColor(color);
   display->setTextSize(1);
   display->setCursor(2, 4);
-  display->print("PARTY VOLUME");
+  display->print("VOLUME");
 
   // simple bar graph
   int barWidth = map(dbLevel, 0, 100, 0, 60);
