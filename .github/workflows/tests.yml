@@ -1,0 +1,27 @@
+# Host-side tests for the hardware-free parts of the firmware.
+#
+# Deliberately does NOT build the Arduino sketches. That needs the ESP32 core
+# and several third-party libraries, takes minutes, and would still tell us
+# nothing about whether the display is correct — the bugs that actually
+# happened on this project were all perceptual or electrical, and were found by
+# looking at the panel. This job guards the one part that can be wrong without
+# looking wrong: the zone-to-pixel math.
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  hr-zones:
+    name: HR zone math
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # config.h includes secrets.h, which is gitignored (it holds the Whoop's
+      # MAC). The Makefile falls back to secrets.h.example, which also means a
+      # broken example file fails the build rather than going unnoticed.
+      - name: Run tests
+        run: make -C tests

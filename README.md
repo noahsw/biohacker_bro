@@ -143,6 +143,38 @@ was split:
 - **BLE/Whoop connection and MAC filtering** could not be tested until
   real hardware + the real Whoop strap were both available.
 
+## Host-side tests
+
+```bash
+make -C tests
+```
+
+Compiles with a plain `c++` — no Arduino toolchain, no board attached — and
+runs in CI on every PR (`.github/workflows/tests.yml`).
+
+**What's tested, and why only this.** Only `hr_zones.cpp`: the BPM-to-zone and
+zone-to-pixel math. That's the one part of this firmware that can be wrong
+without *looking* wrong — a bar of the wrong length is still a plausible bar.
+Everything else is I/O against hardware that can't be exercised off-device,
+and mocking the HUB75 driver would test the mocks. Worth noting that every bug
+actually hit on this project so far (unreadable glyph, wrong clock phase,
+single-buffer tearing, the heart popping instead of beating) was perceptual or
+electrical and was found by looking at the panel — no test would have caught
+any of them.
+
+**They're property tests, not a table of expected values.** The thresholds in
+`config.h` are wearer-specific and expected to be retuned; a test asserting
+"110bpm is zone 3" would fail on every retune and train you to ignore it.
+Instead they assert what must hold for *any* sane threshold set: slices tile
+the panel exactly with no gap or overlap, the bar never shortens as BPM rises,
+zone boundaries land exactly on slice edges, every zone is reachable, and the
+ends clamp. So the workflow for a retune is: edit the constants, run the
+tests, and find out immediately whether you broke the scale.
+
+The suite has been mutation-checked — thresholds put out of order, the bar
+re-anchored to 0bpm, an off-by-one in the tiling, and a removed clamp each
+make it fail.
+
 ## Setup (Arduino IDE on macOS)
 
 1. Install Arduino IDE.

@@ -27,6 +27,7 @@
 
 #include "config.h"
 #include "display_ui.h"
+#include "hr_zones.h"
 
 // Wokwi's serial monitor watches UART0 (Serial0). On real hardware built with
 // CDCOnBoot=cdc, the USB port the Mac sees is `Serial` and Serial0 goes to
