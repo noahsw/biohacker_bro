@@ -61,3 +61,18 @@
 #define MIC_WS_PIN    21
 #define MIC_DATA_PIN  47
 #define MIC_CONFIGURED false  // flip to true once real audio is confirmed
+
+// --- 5. HR zone thresholds (BPM) ---
+// Deliberately skewed HIGHER than a standard training-zone chart: this is worn
+// while DANCING, not doing intervals, so the usual "zone 4 by 150bpm" scale
+// would peg the bar red all night and stop telling you anything. Tuned so a
+// casual shuffle sits in Z1-Z2 and genuinely going for it lands in Z3 (green),
+// leaving Z4/5 as a rarely-hit ceiling.
+//   Z0 <95 | Z1 95-114 | Z2 115-134 | Z3 135-159 | Z4/5 160+
+#define ZONE1_BPM 95
+#define ZONE2_BPM 115
+#define ZONE3_BPM 135
+#define ZONE4_BPM 160
+// The top of the Z4/5 band, used only to compute progress ACROSS that last
+// segment of the bar (there's no zone above it to spill into).
+#define ZONE_MAX_BPM 190
