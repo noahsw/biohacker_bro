@@ -25,16 +25,39 @@ unsigned long lastBeatTime = 0;
 // zone number, so zoneFloor[z]..zoneFloor[z+1] is zone z's BPM range.
 const int zoneFloor[6] = { 0, ZONE1_BPM, ZONE2_BPM, ZONE3_BPM, ZONE4_BPM, ZONE_MAX_BPM };
 
+// The zone ramp, as it appears on the legend and the bar. Ordered so
+// PERCEIVED brightness climbs the whole way up — dim neutral, bright neutral,
+// then a cold-to-hot hue ramp — so the bar reads as intensity growing even
+// before you've learned which color means which zone.
+//
+// White is capped at 140 rather than 255 on purpose. At full white, Z1 was
+// the brightest thing on the panel and the step up to blue read as a DROP in
+// intensity, which is backwards. Holding white below blue's apparent
+// brightness keeps the ramp monotonic.
 uint16_t zonePalette(int zone) {
   switch (zone) {
-    case 0:  return display->color565(255, 255, 255); // white
-    // Deliberately dim: at full-ish gray, Z0 white and Z1 gray were nearly
-    // indistinguishable on the real panel — an LED "gray" is just a dimmer
-    // white, so the two segments need a big brightness gap to read apart.
-    case 1:  return display->color565(55, 55, 55);   // gray
-    case 2:  return display->color565(0, 110, 255);   // blue
-    case 3:  return display->color565(0, 220, 60);    // green
-    default: return display->color565(255, 30, 30);   // red (Z4/5)
+    case 0:  return display->color565(45, 45, 45);    // gray   — barely moving
+    case 1:  return display->color565(140, 140, 140); // white  — warming up
+    case 2:  return display->color565(0, 110, 255);   // blue   — moving
+    case 3:  return display->color565(255, 190, 0);   // yellow — going for it
+    default: return display->color565(255, 30, 30);   // red    — Z4/5
+  }
+}
+
+// The same zones, brightened for the BPM digits.
+//
+// The legend is a single 1px row where dimness is fine and actually helps the
+// ramp; the BPM number is 14px tall and has to be readable across a dark room.
+// Those are different jobs, so they get different values — at rest, a Z0
+// number in the legend's 45-gray would be almost invisible, which is exactly
+// when you'd most want to read it.
+uint16_t zoneTextPalette(int zone) {
+  switch (zone) {
+    case 0:  return display->color565(150, 150, 150);
+    case 1:  return display->color565(255, 255, 255);
+    case 2:  return display->color565(0, 140, 255);
+    case 3:  return display->color565(255, 200, 0);
+    default: return display->color565(255, 40, 40);
   }
 }
 
@@ -116,7 +139,7 @@ int hrZone(int bpm) {
 }
 
 uint16_t zoneColor(int bpm) {
-  return zonePalette(hrZone(bpm));
+  return zoneTextPalette(hrZone(bpm));
 }
 
 bool displaySetup() {
@@ -212,7 +235,9 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
     display->fillRect(x0, LEGEND_Y, x1 - x0, 1, zonePalette(z));
   }
 
-  // --- The live bar, 2px tall, sitting on the legend
+  // --- The live bar, 2px tall, sitting on the legend. It uses the brighter
+  // text palette rather than the legend's, so the needle reads clearly
+  // against the scale it's sitting on even where the two share a color.
   if (connected) {
     int width = (int)(barFraction(bpm) * PANEL_WIDTH + 0.5f);
     if (width < 1) width = 1; // always show something so it never reads as "off"
