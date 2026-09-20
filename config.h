@@ -15,28 +15,44 @@
 #define PANEL_HEIGHT 32
 #define PANEL_CHAIN  1
 
-// --- 2b. HUB75 pin mapping — UNCONFIRMED for your exact board, see note in biohacker_bro.ino ---
-#define R1_PIN  4
-#define G1_PIN  5
+// --- 2b. HUB75 pin mapping — CONFIRMED for this board ---
+// The board is sold by WatangTech but its model is Seengreat's "RGB Matrix
+// HUB75 S3" (confirmed against the spec sheet: same model name, same
+// ESP32-S3-WROOM-1-N16R8, 16MB/8MB, 2x USB-C, VH-4P 5V/4A out, 2x HUB75,
+// ES7210 + ES8311, SD + PCF85063 RTC). Mapping is that model's wiki table:
+//   https://seengreat.com/wiki/214/rgb-matrix-hub75-s3
+// Note R1/G1 are NOT in the "obvious" order — G1 is the lower GPIO.
+#define R1_PIN  5
+#define G1_PIN  4
 #define B1_PIN  6
-#define R2_PIN  7
-#define G2_PIN  15
-#define B2_PIN  16
-#define A_PIN   17
+#define R2_PIN  15
+#define G2_PIN  7
+#define B2_PIN  17
+#define A_PIN   8
 #define B_PIN   18
-#define C_PIN   8
-#define D_PIN   3
-#define E_PIN   -1   // set to a real pin if your panel needs an E line (1/32 scan panels do)
-#define LAT_PIN 40
-#define OE_PIN  39
-#define CLK_PIN 41
+#define C_PIN   10
+#define D_PIN   9
+// E is wired to IO16 on this board, but the Waveshare RGB-Matrix-P2.5-64x32
+// is 1/16 scan (confirmed in its user guide) and so only uses A-D. Leave at
+// -1; set to 16 only if you ever drive a 1/32-scan panel such as a 64x64.
+#define E_PIN   -1
+#define LAT_PIN 11   // LAT / STB
+#define OE_PIN  13
+#define CLK_PIN 12
 
 // --- 3. MPU6050 (accelerometer) — confirmed pins from earlier in build ---
 #define MPU_SDA 45
 #define MPU_SCL 46
 
-// --- 4. Mic I2S pins — TODO: fill in once confirmed for your board ---
-#define MIC_BCLK_PIN  -1  // TODO
-#define MIC_WS_PIN    -1  // TODO
-#define MIC_DATA_PIN  -1  // TODO
-#define MIC_CONFIGURED false  // flip to true once the 3 pins above are filled in
+// --- 4. Mic I2S pins — from the same vendor wiki (ES7210 ADC side) ---
+// The ES7210 (mic ADC) and ES8311 (speaker codec) share one I2S bus:
+//   MCLK=IO38, SCLK/BCLK=IO48, LRCK/WS=IO21, DSDIN(to speaker)=IO14,
+//   SDOUT(from mics)=IO47
+// We only want to LISTEN, so DATA_IN is SDOUT. Still unverified on hardware,
+// and the ES7210 likely needs I2C register init before it outputs anything —
+// hence MIC_CONFIGURED stays false until it's actually tested.
+#define MIC_MCLK_PIN  38
+#define MIC_BCLK_PIN  48
+#define MIC_WS_PIN    21
+#define MIC_DATA_PIN  47
+#define MIC_CONFIGURED false  // flip to true once real audio is confirmed

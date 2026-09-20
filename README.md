@@ -37,7 +37,7 @@ seconds. This is a costume prop, not a medical device — the goal is
 | Heart rate source | Whoop strap | HR Broadcast mode enabled in the Whoop app — broadcasts the **standard Bluetooth Heart Rate Service (0x180D)**, same protocol used by gym equipment. Whoop does NOT expose steps, HRV, recovery, etc. over this BLE service — only HR. |
 | Accelerometer (steps) | GY-521 breakout (MPU-6050) | 3–5V tolerant onboard regulator. Wired to VCC (3.3V), GND, SDA→IO45, SCL→IO46. |
 | Mic | Onboard ES7210 codec + dual mics | Already on the main board. I2S pins **not yet confirmed** — see Known Unknowns. |
-| Power | Anker 537 PowerCore 24K (24,000mAh) | Two USB-C ports — one powers the ESP32-S3 board, the other powers the panel directly. At plain 5V (not higher PD voltages), each port maxes around 3A (~15W) — under the panel's "4A for full brightness" spec but above its 2.5A minimum, so it runs fine at slightly reduced brightness. Estimated runtime well beyond the 5-hour party (see calc below). |
+| Power | Anker 537 PowerCore 24K (24,000mAh) | Two USB-C ports feed the controller board's **two** USB-C inputs, which are separate rails ("Board" + "Panel"). The panel is then fed from the board's **VH-4P (3.96mm) 5V/4A output** — that is the board's designed panel path, and it keeps the panel's current off the ESP32's rail. The panel asks 5V/2.5A min via its VH4 header, so the 4A output covers it. At plain 5V (not higher PD voltages) each Anker port maxes around 3A (~15W). Estimated runtime well beyond the 5-hour party (see calc below). |
 
 **Runtime estimate:** 24,000mAh × 3.7V ≈ 88.8Wh, ~75-80Wh usable after
 USB-C conversion losses. At a realistic draw for this display (dark
@@ -63,8 +63,15 @@ running, but if boot ever becomes unreliable with the sensor attached,
 this is the first thing to investigate.
 
 **HUB75 panel → ESP32-S3 board:** connects via the included ribbon cable
-between the board's HUB75 header and the panel's "IN" port. **Exact pin
-mapping is not yet confirmed** — see Known Unknowns below.
+between the board's HUB75 header and the panel's **"IN"** port (the panel's
+second header is an OUT for chaining). The controller's "2x HUB75" is just
+two connector styles for the same signals — a boxed header and a direct-plug
+header — so use whichever fits the ribbon. GPIO mapping is confirmed and
+lives in `config.h`; see Known Unknowns below for the source and the two
+traps (G1 is the lower GPIO, and E stays -1 on a 1/16-scan panel).
+
+**Panel power:** not from the ribbon — via the board's VH-4P 5V/4A output to
+the panel's VH4 input. See the Power row in the hardware table.
 
 ## Software architecture
 
@@ -81,9 +88,10 @@ subsystems:
    library), computes acceleration magnitude, and counts a step whenever
    the magnitude deviates from the ~1g baseline past a threshold, with a
    debounce window to avoid double-counting.
-3. **Decibel/mic level** — placeholder pending I2S pin confirmation (see
-   below); currently outputs a fake wobble so the rest of the system
-   isn't blocked on it.
+3. **Decibel/mic level** — I2S pins are now known but untested, and the
+   ES7210 still needs register init, so this remains a placeholder that
+   outputs a fake wobble (see Known Unknowns) rather than real audio. The
+   rest of the system is not blocked on it.
 4. **Display rendering** — `ESP32-HUB75-MatrixPanel-I2S-DMA` library
    (Arduino Library Manager listing name: **"ESP32 HUB75 LED MATRIX PANEL
    DMA Display"** by MrCodetastic — the GitHub repo was renamed from
@@ -94,14 +102,19 @@ subsystems:
 
 ## Known unknowns / TODOs (be upfront about these — don't guess silently)
 
-- **HUB75 pin mapping**: the sketch currently has a *placeholder* pin
-  assignment based on common ESP32-S3 HUB75 board layouts, NOT confirmed
-  against WatangTech's actual schematic. Needs verification from the
-  product's documentation/wiki or the board's silkscreen labels once
-  physically in hand.
-- **Mic I2S pins** (BCLK/WS/DATA for the ES7210 codec): vendor-specific,
-  not yet known. The decibel subsystem is written to be easy to complete
-  once these are found, but shouldn't be guessed at.
+- **HUB75 pin mapping**: RESOLVED. The board is sold under the WatangTech
+  name but its model is Seengreat's **"RGB Matrix HUB75 S3"** — confirmed
+  against the controller's spec sheet (same model name, ESP32-S3-WROOM-1
+  -N16R8, 16MB/8MB, 2x USB-C in, VH-4P 5V/4A out, 2x HUB75, ES7210 + ES8311,
+  SD + PCF85063 RTC). That model's wiki publishes the GPIO mapping:
+  https://seengreat.com/wiki/214/rgb-matrix-hub75-s3 — `config.h` now uses
+  it. One trap: R1=IO5 / G1=IO4, so the lower GPIO is G1, not R1.
+  `E_PIN` stays -1: E is wired to IO16, but the Waveshare panel is 1/16 scan
+  (per its own user guide) and only uses A-D.
+- **Mic I2S pins**: now known from the same wiki (MCLK=38, BCLK=48, WS=21,
+  mic data in / SDOUT=47), but untested — and the ES7210 almost certainly
+  needs I2C register setup before it streams anything, so `MIC_CONFIGURED`
+  stays `false` until real audio is confirmed.
 - **Step detection threshold** (`STEP_THRESHOLD` in code): a starting
   guess. Needs real-world tuning once worn, since stride and mounting
   position affect it.
