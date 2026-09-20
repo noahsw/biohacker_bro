@@ -31,7 +31,7 @@ void loop() {
   static unsigned long lastPrint = 0;
   if (millis() - lastPrint > 300) {
     lastPrint = millis();
-    Serial.printf("Steps: %lu\n", stepCount);
+    Serial.printf("Steps: %lu\r\n", stepCount);
   }
 
   delay(10);

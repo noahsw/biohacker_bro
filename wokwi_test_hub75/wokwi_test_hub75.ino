@@ -66,7 +66,7 @@ void loop() {
   static unsigned long lastLog = 0;
   if (now - lastLog > 1000) {
     lastLog = now;
-    Serial0.printf("loop alive: mode=%d bpm=%d steps=%lu db=%d\n", currentMode, fakeBpm, fakeSteps, fakeDb);
+    Serial0.printf("loop alive: mode=%d bpm=%d steps=%lu db=%d\r\n", currentMode, fakeBpm, fakeSteps, fakeDb);
   }
 
   delay(30);

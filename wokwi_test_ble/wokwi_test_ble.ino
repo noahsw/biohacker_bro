@@ -31,7 +31,7 @@ void loop() {
   static unsigned long lastPrint = 0;
   if (millis() - lastPrint > 500) {
     lastPrint = millis();
-    Serial.printf("Connected: %s  BPM: %d\n", hrConnected ? "yes" : "no", currentBPM);
+    Serial.printf("Connected: %s  BPM: %d\r\n", hrConnected ? "yes" : "no", currentBPM);
   }
 
   delay(10);
