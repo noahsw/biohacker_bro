@@ -20,6 +20,8 @@
     [ "esp:41", "matrix:CLK", "yellow", [] ],
     [ "esp:40", "matrix:LAT", "purple", [] ],
     [ "esp:39", "matrix:OE",  "purple", [] ],
-    [ "esp:GND","matrix:GND", "black",  [] ]
+    [ "esp:GND.1","matrix:GND", "black",  [] ],
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ]
   ]
 }
