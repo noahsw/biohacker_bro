@@ -1,5 +1,6 @@
 #include "display_ui.h"
 #include "config.h"
+#include "hr_zones.h"
 
 MatrixPanel_I2S_DMA *display = nullptr;
 
@@ -20,11 +21,6 @@ const int BAR_TOP_Y    = 29;  // bar occupies rows 29 and 30
 const int LEGEND_Y     = 31;
 
 unsigned long lastBeatTime = 0;
-
-// Lower bound of each zone, plus the ceiling of the top zone. Indexed by
-// zone number, so zoneFloor[z]..zoneFloor[z+1] is zone z's BPM range. Note
-// that zone 0 starts at REST_BPM rather than 0 — see config.h.
-const int zoneFloor[6] = { REST_BPM, ZONE1_BPM, ZONE2_BPM, ZONE3_BPM, ZONE4_BPM, ZONE_MAX_BPM };
 
 // The zone ramp, as it appears on the legend and the bar. Ordered so
 // PERCEIVED brightness climbs the whole way up — dim neutral, bright neutral,
@@ -63,13 +59,6 @@ uint16_t zoneTextPalette(int zone) {
     case 3:  return display->color565(255, 205, 0);   // yellow
     default: return display->color565(255, 70, 70);   // red, lifted
   }
-}
-
-// Left edge of zone `z`'s 20% slice. Derived from the panel width rather than
-// hardcoded so the 64px doesn't quietly round away: 64/5 = 12.8px per zone,
-// so the slices come out 12 or 13 wide and still tile the row exactly.
-int zoneSliceX(int z) {
-  return (PANEL_WIDTH * z) / 5;
 }
 
 // Simple pixel-art heart, drawn centered, scaled slightly for the "beat"
@@ -118,29 +107,7 @@ float beatIntensity() {
   return i;
 }
 
-// Fraction (0..1) of the way along the FULL bar for this BPM: each zone owns
-// exactly 20% of the width, and position inside that 20% is progress through
-// the zone's own BPM range. So the bar is piecewise-linear, not linear in BPM
-// — which is what makes "am I nearly into the next zone?" readable at a glance.
-float barFraction(int bpm) {
-  int z = hrZone(bpm);
-  int lo = zoneFloor[z];
-  int hi = zoneFloor[z + 1];
-  float within = (float)(bpm - lo) / (float)(hi - lo);
-  if (within < 0.0f) within = 0.0f;
-  if (within > 1.0f) within = 1.0f; // above ZONE_MAX_BPM: pin the bar full
-  return (z + within) / 5.0f;
-}
-
 } // namespace
-
-int hrZone(int bpm) {
-  if (bpm < ZONE1_BPM) return 0;
-  if (bpm < ZONE2_BPM) return 1;
-  if (bpm < ZONE3_BPM) return 2;
-  if (bpm < ZONE4_BPM) return 3;
-  return 4;
-}
 
 uint16_t zoneColor(int bpm) {
   return zoneTextPalette(hrZone(bpm));
@@ -240,8 +207,8 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
   // --- Zone legend: the fixed scale along the very bottom row, lit whether
   // or not we have a reading, so the bar above it always has context.
   for (int z = 0; z < 5; z++) {
-    int x0 = zoneSliceX(z);
-    int x1 = zoneSliceX(z + 1);
+    int x0 = zoneSliceX(z, PANEL_WIDTH);
+    int x1 = zoneSliceX(z + 1, PANEL_WIDTH);
     display->fillRect(x0, LEGEND_Y, x1 - x0, 1, zonePalette(z));
   }
 
@@ -256,9 +223,9 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
     int width = (int)(barFraction(bpm) * PANEL_WIDTH + 0.5f);
     if (width < 1) width = 1; // always show something so it never reads as "off"
     for (int z = 0; z < 5; z++) {
-      int x0 = zoneSliceX(z);
+      int x0 = zoneSliceX(z, PANEL_WIDTH);
       if (width <= x0) break;              // fill ended before this slice
-      int x1 = zoneSliceX(z + 1);
+      int x1 = zoneSliceX(z + 1, PANEL_WIDTH);
       if (width < x1) x1 = width;          // partial slice: this is the tip
       display->fillRect(x0, BAR_TOP_Y, x1 - x0, 2, zonePalette(z));
     }
