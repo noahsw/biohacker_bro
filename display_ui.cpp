@@ -2,23 +2,83 @@
 #include "config.h"
 #include "hr_zones.h"
 
+#include <Fonts/FreeSans12pt7b.h>
+#include <Fonts/FreeSansBold12pt7b.h>
+#include <Fonts/FreeMonoBold12pt7b.h>
+#include <Fonts/FreeMonoBold18pt7b.h>  // BPM digits: 17px cap height, uniform 13px advance
+#include <Fonts/TomThumb.h>        // "STEPS": 3x5, the smallest legible capitals
+
 MatrixPanel_I2S_DMA *display = nullptr;
 
 // ============================================================================
 // LAYOUT (64x32)
 // ============================================================================
-//   x0..21,  y0..28   heart, beating in time with the real BPM
-//   x23..63, y3..17   BPM, size 2, in the current zone's color
-//   x23..63, y21..28  step count, size 1
-//   y29..30           the 2px-tall live HR bar (current zone's color)
-//   y31               the fixed 5-segment zone legend, lit at all times
-// The bar sits directly on top of the legend on purpose: the legend is the
-// scale and the bar is the needle, so any gap between them would make the
-// two read as unrelated widgets.
+//   y0                the fixed 5-segment zone legend, lit at all times
+//   y1..2             the 2px-tall live HR bar (current zone's color)
+//   x?..41,  y5..18   BPM, built-in 5x7 at size 2, right-aligned, zone-colored
+//   x45..61, y5..19   heart, pulsing in brightness on each beat (tops flush
+//                     with the digits; the point hangs one row below)
+//   x?..41,  y24..30  step count, built-in 5x7, right-aligned, 2px ticks
+//   x43..61, y26..30  "STEPS", TomThumb 3x5, dim
+//
+// Vertical budget is roughly 10 / 60 / 30: three rows of gauge, nineteen of
+// heart rate, ten of steps. The gauge is on TOP, touching the heart rate and
+// nothing else — the bar IS the heart rate, and adjacency is the only thing
+// on a panel this size that says which number a gauge belongs to. Sandwiched
+// between the two numbers it would touch both and mean neither.
+//
+// Two columns: both numbers right-aligned to x39, heart and "STEPS" stacked
+// in the right-hand column. Right-aligning is what keeps a number still as it
+// gains or loses a digit — the ones column never moves.
+//
+// The BPM is unlabelled and the steps are labelled, which is deliberate: the
+// heart beside the number says "heart rate" better than three letters would,
+// and there is no room for both a heart and a "BPM". A bare number under a
+// heart rate, though, reads as another cardiac figure, so that one gets a word.
+//
+// FONT NOTE. FreeSans12pt7b, not the built-in font at size 2 or 3. The built-in
+// font only scales by whole numbers: 14px tall (what this used to be) or 21px,
+// nothing between, and at 21px three digits are 54px wide, leaving no room for
+// a heart. FreeSans12pt7b is 17px tall in 39px. It's also the only 17px sans
+// here whose digits all share one 13px advance — FreeSansBold's '1' is a pixel
+// WIDER than its other digits, which would shuffle the number sideways every
+// time the hundreds digit appeared. Regular rather than bold was an aesthetic
+// call (instrument, not signage); the strokes differ by about one pixel, so
+// swapping to FreeSansBold12pt7b is a one-line change if it reads too thin on
+// the panel — but it needs the heart dropped to scale 4 to fit.
 namespace {
 
-const int BAR_TOP_Y    = 29;  // bar occupies rows 29 and 30
-const int LEGEND_Y     = 31;
+const int BAR_TOP_Y    = 1;   // bar occupies rows 1 and 2
+const int LEGEND_Y     = 0;
+
+// Both numbers share this right edge, in the left-hand column.
+//
+// Width budget across the 64px row, right to left: 2px right margin, 17px
+// heart, 3px gap, and 42px of digits ending here at x41. The 2px margin is
+// deliberate — flush to x63 the heart read as falling off the panel.
+const int NUM_RIGHT_X  = 41;
+// FreeSans12pt7b is baseline-positioned; 21 - 17 (cap height) = top row 4.
+// Baseline 19, not 18: FreeMonoBold12pt7b's digits have a -14 yOffset and are
+// 15 tall, so this puts them on rows 5..19 — exactly the rows a scale-4 heart
+// at cy=11 occupies. Number and heart are flush top and bottom, no fudge.
+const int BPM_BASELINE_Y = 19;
+// Built-in font is top-positioned, and 14px tall at size 2: rows 5..18.
+const int BPM_BUILTIN_TOP_Y = 5;
+// Seven-segment is drawn from its top row: rows 3..18, one taller than
+// FreeMonoBold's 15. Its two bowls are identical rectangles by construction,
+// so an 8 cannot come out lopsided the way a rasterised one can.
+const int SEVENSEG_TOP_Y = 3;
+const int SEVENSEG_W = 9, SEVENSEG_H = 16, SEVENSEG_T = 2, SEVENSEG_GAP = 2;
+// Built-in font is top-positioned.
+const int STEPS_TOP_Y  = 24;
+// TomThumb is baseline-positioned; 31 - 5 = top row 26.
+const int STEPS_LABEL_BASELINE_Y = 31;
+// Right-hand column: heart above, "STEPS" below.
+const int HEART_CX     = 53;
+const int HEART_CY     = 11;
+const int HEART_SCALE  = 4;
+const float HEART_FLOOR = 0.15f;  // brightness between beats; see drawMainScreen
+const int LABEL_X      = 43;  // "STEPS" right edge lines up with the heart's
 
 unsigned long lastBeatTime = 0;
 
@@ -61,9 +121,17 @@ uint16_t zoneTextPalette(int zone) {
   }
 }
 
-// Simple pixel-art heart, drawn centered, scaled slightly for the "beat"
+// Simple pixel-art heart: two circles for the top lobes + a triangle for the
+// point. Vertical extent is [cy - scale - scale/2, cy + scale*2], i.e. 15 rows
+// at scale 4, one more than size-2 text — fillCircle spans 2r+1 rows, not 2r.
+//
+// That odd row means the point hangs one row below the BPM digits' baseline.
+// Tried trimming it to cy + scale*2 - 1 so the two blocks were flush, and
+// rejected it on looks: at this scale the tip is only a couple of pixels wide,
+// so removing a row blunts it enough that the silhouette stops reading as a
+// heart. A clean bounding box isn't worth a heart that looks wrong, on a
+// costume whose whole job is to be recognised at a glance. Keep the point.
 void drawHeart(int cx, int cy, int scale, uint16_t color) {
-  // Two circles for the top lobes + a triangle for the bottom point
   display->fillCircle(cx - scale, cy - scale / 2, scale, color);
   display->fillCircle(cx + scale, cy - scale / 2, scale, color);
   display->fillTriangle(cx - scale * 2, cy,
@@ -72,14 +140,109 @@ void drawHeart(int cx, int cy, int scale, uint16_t color) {
                          color);
 }
 
-// Draws text ending at `rightEdge` instead of starting at a cursor, so a
-// number stays inside the panel as it gains digits. 6px per char at size 1,
-// scaling linearly with text size.
-void printRightAligned(const char *text, int rightEdge, int y, int textSize) {
-  int width = strlen(text) * 6 * textSize;
-  display->setTextSize(textSize);
-  display->setCursor(rightEdge - width + 1, y);
+// Draws a step count with two-pixel diagonal ticks in place of commas.
+//
+// The font's own comma is 6px of advance — as wide as a whole digit — which
+// on a 42px column is an absurd price for a separator. These ticks cost 3px:
+// two pixels on a diagonal at the baseline, which is enough to group the
+// digits without pretending to be punctuation at this size.
+//
+// Drawn digit by digit rather than with print() because GFX has no way to
+// vary advance mid-string; the separator has to be positioned by hand.
+void drawStepCount(unsigned long value, int rightEdge, int topY, uint16_t color) {
+  const int DIGIT_ADVANCE = 6;  // built-in font: 5px glyph + 1px gap
+  const int SEP_ADVANCE   = 3;  // 2px tick + 1px gap
+
+  char digits[12];
+  int n = snprintf(digits, sizeof(digits), "%lu", value);
+  int seps  = (n - 1) / 3;
+  int width = n * DIGIT_ADVANCE - 1 + seps * SEP_ADVANCE;
+
+  display->setFont(NULL);
+  display->setTextSize(1);
+
+  int x = rightEdge - width + 1;
+  for (int i = 0; i < n; i++) {
+    if (i > 0 && (n - i) % 3 == 0) {
+      // Bottom-left leaning, so it reads as falling away from the digit
+      // before it rather than as a stray dot between two numbers.
+      display->drawPixel(x + 1, topY + 5, color);
+      display->drawPixel(x,     topY + 6, color);
+      x += SEP_ADVANCE;
+    }
+    // bg == color puts drawChar in transparent mode (GFX only fills a
+    // background when the two differ), so the ticks aren't painted over.
+    display->drawChar(x, topY, digits[i], color, color, 1);
+    x += DIGIT_ADVANCE;
+  }
+}
+
+// Draws text so its right edge lands on `rightEdge`, for whatever font is
+// currently set. Asks GFX for the rendered bounds rather than assuming a
+// character width: the built-in font is a fixed 6px per char, but a free font
+// is proportional and carries a left side bearing, so computing this by hand
+// gets it wrong by a pixel or two per string.
+//
+// `y` means different things per font, which is GFX's design, not ours: for
+// the built-in font it's the TOP row of the glyphs; for a free font it's the
+// BASELINE, with the glyphs sitting above it. Callers below say which.
+void printRightAligned(const char *text, int rightEdge, int y) {
+  int16_t bx, by;
+  uint16_t bw, bh;
+  display->getTextBounds(text, 0, y, &bx, &by, &bw, &bh);
+  display->setCursor(rightEdge - bw - bx + 1, y);
   display->print(text);
+}
+
+// --- Seven-segment digits -------------------------------------------------
+//
+// A scoreboard/instrument numeral, drawn from seven rectangles rather than
+// loaded from a font. Worth it here for three reasons a bitmap font can't
+// match: the stroke thickness is a parameter (no font ships at "a bit
+// bolder"), every digit is exactly the same width, and it costs no font data
+// at all — the geometry IS the glyph.
+//
+// Segment layout and bit assignment:
+//        aaaa          a=1   b=2   c=4   d=8
+//       f    b         e=16  f=32  g=64
+//       f    b
+//        gggg
+//       e    c
+//       e    c
+//        dddd
+const uint8_t SEG_DIGIT[10] = {
+  0x3F, // 0: abcdef
+  0x06, // 1: bc
+  0x5B, // 2: abdeg
+  0x4F, // 3: abcdg
+  0x66, // 4: bcfg
+  0x6D, // 5: acdfg
+  0x7D, // 6: acdefg
+  0x07, // 7: abc
+  0x7F, // 8: all
+  0x6F, // 9: abcdfg
+};
+
+// Draws one digit with its top-left at (x, y). Horizontal segments span the
+// full width; verticals are half-height plus one stroke so they meet the
+// middle bar cleanly instead of leaving a notch at the joint.
+void drawSevenSegDigit(int d, int x, int y, int w, int h, int t, uint16_t on,
+                       uint16_t off) {
+  uint8_t m = (d >= 0 && d <= 9) ? SEG_DIGIT[d] : 0;
+  int midY = y + (h - t) / 2;
+  int vH   = (h + t) / 2;
+  int rx   = x + w - t;
+  int botY = y + h - t;
+  // Each segment is drawn in `on` or `off`; `off` is normally the background,
+  // but passing a dim colour gives the unlit-segment ghosting of a real LED
+  // display. Left as a parameter rather than hardcoded so it stays a choice.
+  display->fillRect(x,   y,    w, t,  (m & 0x01) ? on : off); // a
+  display->fillRect(rx,  y,    t, vH, (m & 0x02) ? on : off); // b
+  display->fillRect(rx,  midY, t, vH, (m & 0x04) ? on : off); // c
+  display->fillRect(x,   botY, w, t,  (m & 0x08) ? on : off); // d
+  display->fillRect(x,   midY, t, vH, (m & 0x10) ? on : off); // e
+  display->fillRect(x,   y,    t, vH, (m & 0x20) ? on : off); // f
+  display->fillRect(x,   midY, w, t,  (m & 0x40) ? on : off); // g
 }
 
 // How "contracted" the heart is right now, 0.0 (relaxed) to 1.0 (full thump).
@@ -108,6 +271,39 @@ float beatIntensity() {
 }
 
 } // namespace
+
+// The built-in 5x7 at size 2, chosen on hardware over four real typefaces.
+//
+// Which is where this started, and worth recording so nobody re-runs the
+// search: FreeSans read as too curvy, FreeSansBold likewise and its '1' is a
+// pixel wider than its other digits, seven-segment as too blocky, and
+// FreeMonoBold18pt is 63px for three digits — the whole panel, nowhere to put
+// the heart. The useful finding is that NOTHING between 14px and 21px both
+// fits beside a heart and looks right at 2.5mm pitch, so the blocky face
+// isn't a compromise, it's the only thing in the range.
+//
+// It also matches the step count below it, which the free fonts never did.
+BpmStyle bpmStyle = BPM_BUILTIN_2;
+
+void setBpmStyle(BpmStyle style) { bpmStyle = style; }
+
+const char *bpmStyleName(BpmStyle style) {
+  switch (style) {
+    case BPM_BUILTIN_2: return "builtin-x2";
+    case BPM_SANS:      return "FreeSans12pt";
+    case BPM_SANS_BOLD: return "FreeSansBold12pt";
+    case BPM_MONO_BOLD: return "FreeMonoBold12pt";
+    case BPM_SEVEN_SEG: return "seven-segment";
+    default:            return "?";
+  }
+}
+
+void drawSolidTest(uint8_t r, uint8_t g, uint8_t b) {
+  display->fillScreen(display->color565(r, g, b));
+  display->flipDMABuffer();
+}
+
+float heartBeatLevel() { return beatIntensity(); }
 
 uint16_t zoneColor(int bpm) {
   return zoneTextPalette(hrZone(bpm));
@@ -175,50 +371,23 @@ void updateHeartbeatPhase(int bpm) {
 void drawMainScreen(int bpm, bool connected, unsigned long steps) {
   display->clearScreen();
 
-  // --- Heart: always red (it's a heart), pulsing in brightness on each beat.
-  // Dimmed to a dark ember while we're still hunting for the strap, so a
-  // stale reading can never look live.
-  uint16_t heartColor;
-  if (connected) {
-    float level = 0.35f + 0.65f * beatIntensity();
-    heartColor = display->color565((int)(255 * level), (int)(20 * level), (int)(20 * level));
-  } else {
-    heartColor = display->color565(50, 0, 0);
-  }
-  drawHeart(11, 12, 4, heartColor);
+  char buf[16];  // "99,999" plus slack
 
-  // --- BPM, in the current zone's hue at a constant brightness
-  uint16_t bpmColor = connected ? zoneColor(bpm) : display->color565(70, 70, 70);
-  char buf[12];
-  if (connected) {
-    snprintf(buf, sizeof(buf), "%d", bpm);
-  } else {
-    snprintf(buf, sizeof(buf), "--");
-  }
-  display->setTextColor(bpmColor);
-  printRightAligned(buf, 63, 3, 2);
-
-  // --- Steps
-  uint16_t stepColor = display->color565(0, 180, 255);
-  display->setTextColor(stepColor);
-  snprintf(buf, sizeof(buf), "%lu", steps);
-  printRightAligned(buf, 63, 21, 1);
-
-  // --- Zone legend: the fixed scale along the very bottom row, lit whether
-  // or not we have a reading, so the bar above it always has context.
+  // --- Zone legend: the fixed scale on the very top row, lit whether or not
+  // we have a reading, so the bar below it always has context.
   for (int z = 0; z < 5; z++) {
     int x0 = zoneSliceX(z, PANEL_WIDTH);
     int x1 = zoneSliceX(z + 1, PANEL_WIDTH);
     display->fillRect(x0, LEGEND_Y, x1 - x0, 1, zonePalette(z));
   }
 
-  // --- The live bar, 2px tall, sitting on the legend.
+  // --- The live bar, 2px tall, hanging off the legend.
   //
-  // It's painted in the LEGEND's colors, slice by slice, rather than one flat
-  // color: filling to the middle of the blue zone gives you a run of gray,
-  // then white, then blue. So the bar is literally the legend lit up to where
-  // you are — it thickens from 1px to 3px behind you — and the zone is read
-  // from where the fill STOPS, not from what color it is.
+  // Painted in the LEGEND's colors slice by slice rather than one flat color:
+  // filling to the middle of the blue zone gives a run of gray, then white,
+  // then blue. The bar is literally the legend lit up to where you are — it
+  // thickens from 1px to 3px behind you — so the zone is read from where the
+  // fill STOPS, not from what color it is.
   if (connected) {
     int width = (int)(barFraction(bpm) * PANEL_WIDTH + 0.5f);
     if (width < 1) width = 1; // always show something so it never reads as "off"
@@ -230,6 +399,127 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
       display->fillRect(x0, BAR_TOP_Y, x1 - x0, 2, zonePalette(z));
     }
   }
+
+  // --- Heart: always red (it's a heart), pulsing in brightness on each beat.
+  // Dimmed to a dark ember while we're still hunting for the strap, so a
+  // stale reading can never look live.
+  //
+  // The beat lives here rather than on the digits or the bar. Tried it on the
+  // digits and it reads as a failing display, not a pulse — the heart SHAPE is
+  // what makes a brightness envelope legible as a heartbeat. The bar would
+  // work (it's a shape, and it is the heart rate), and it's a two-line change
+  // if you ever want it, but with a heart on the panel two pulsing things
+  // would compete.
+  // Brightness curve, tuned on hardware. The envelope itself was never the
+  // problem — it swings 0.10..1.00, confirmed by printing heartBeatLevel() on
+  // the real panel — but mapping it linearly onto a 0.35 floor made a 3x
+  // change in emitted light read as almost constant. LEDs are perceived
+  // roughly logarithmically, so the top of the range is where the eye is
+  // least sensitive, and a scale-5 heart puts more lit area on the panel,
+  // which raises the eye's adaptation level and flattens it further.
+  //
+  // Squaring the envelope pushes the quiet phase down where the eye still has
+  // resolution, and the lower floor widens the swing. HEART_FLOOR stays above
+  // zero so it glows between beats rather than blinking off.
+  //
+  // These two numbers are the knobs if it still looks wrong on your chest:
+  // floor down or exponent up for a sharper thump, the reverse for a gentler
+  // one. Judge it on the panel, never in a simulator.
+  uint16_t heartColor;
+  if (connected) {
+    float env = beatIntensity();
+    float level = HEART_FLOOR + (1.0f - HEART_FLOOR) * (env * env);
+    heartColor = display->color565((int)(255 * level), (int)(20 * level), (int)(20 * level));
+  } else {
+    heartColor = display->color565(50, 0, 0);
+  }
+  // scale 4 spans [cy-6, cy+8] = 15 rows, so cy=11 puts it on rows 5..19 and
+  // x45..61: the same 15-row height as the digits, with 2px of margin to the
+  // panel edge. Dropped from scale 5 to make that margin fit; the number and
+  // the heart being the same height is worth more than 3px of heart.
+  //
+  // NOT bounding-box aligned with the digits (rows 4..20), on purpose. The
+  // heart is two fat lobes tapering to a point, so its area sits high in its
+  // own box: with the boxes aligned it read as floating above the number.
+  // Integrating the two discs against the triangle puts the heart's centre of
+  // area at about row 11, matching the digits' centre — so this is aligned by
+  // MASS, which is what the eye measures, and the boxes sitting a row apart
+  // is the price.
+  drawHeart(HEART_CX, HEART_CY, HEART_SCALE, heartColor);
+
+  // --- BPM, in the current zone's hue at a constant brightness.
+  // Free font: the y argument is the BASELINE. Cap height is 17, so a baseline
+  // of 21 puts the digits on rows 4..20.
+  uint16_t bpmColor = connected ? zoneColor(bpm) : display->color565(70, 70, 70);
+  if (connected) {
+    snprintf(buf, sizeof(buf), "%d", bpm);
+  } else {
+    snprintf(buf, sizeof(buf), "--");
+  }
+
+  if (bpmStyle == BPM_BUILTIN_2) {
+    // Built-in font: y is the TOP row, not the baseline, so 5 puts the 14px
+    // digits on rows 5..18 against the heart's 5..19 — tops flush, the
+    // heart's point hanging one row below, which is the same relationship the
+    // heart has always had to the digits here.
+    display->setFont(NULL);
+    display->setTextSize(2);
+    display->setTextColor(bpmColor);
+    printRightAligned(buf, NUM_RIGHT_X, BPM_BUILTIN_TOP_Y);
+    display->setTextSize(1);
+  } else if (bpmStyle == BPM_SEVEN_SEG) {
+    // Laid out by hand rather than through GFX: 11px cells with a 2px gap,
+    // right-aligned on the same x39 edge as everything else. "--" while
+    // disconnected becomes middle bars only, which is what a real instrument
+    // with no signal shows.
+    const int CW = SEVENSEG_W, CH = SEVENSEG_H, CT = SEVENSEG_T;
+    const int GAP = SEVENSEG_GAP, TOP = SEVENSEG_TOP_Y;
+    int n = (int)strlen(buf);
+    int totalW = n * CW + (n - 1) * GAP;
+    int x = NUM_RIGHT_X - totalW + 1;
+    for (int i = 0; i < n; i++) {
+      int cx = x + i * (CW + GAP);
+      if (buf[i] == '-') {
+        display->fillRect(cx, TOP + (CH - CT) / 2, CW, CT, bpmColor);
+      } else {
+        drawSevenSegDigit(buf[i] - '0', cx, TOP, CW, CH, CT, bpmColor, 0);
+      }
+    }
+  } else {
+    switch (bpmStyle) {
+      case BPM_SANS_BOLD: display->setFont(&FreeSansBold12pt7b); break;
+      case BPM_MONO_BOLD: display->setFont(&FreeMonoBold12pt7b); break;
+      default:            display->setFont(&FreeSans12pt7b);     break;
+    }
+    display->setTextSize(1);
+    display->setTextColor(bpmColor);
+    printRightAligned(buf, NUM_RIGHT_X, BPM_BASELINE_Y);
+  }
+
+  // --- Step count, right-aligned under the BPM on the same x39 edge.
+  // Built-in font: y is the TOP row, so 24 puts it on rows 24..30.
+  //
+  // Capped at 5 digits (so, "99,999"): far beyond a party's worth of walking,
+  // and a number that sticks degrades more gracefully than one that silently
+  // outgrows its column.
+  drawStepCount(steps > 99999UL ? 99999UL : steps, NUM_RIGHT_X, STEPS_TOP_Y,
+                display->color565(0, 180, 255));
+
+  // --- "STEPS", in the right-hand column under the heart.
+  //
+  // 3x5 rather than the 5x7 used everywhere else: at 5x7 the word is 30px and
+  // won't fit beside the count in this column, and it's a label, which should
+  // never out-shout its number. Dim for the same reason.
+  //
+  // Labelled while the BPM isn't — see the layout note above.
+  display->setFont(&TomThumb);
+  display->setTextColor(display->color565(0, 90, 130));
+  display->setCursor(LABEL_X, STEPS_LABEL_BASELINE_Y);
+  display->print("STEPS");
+
+  // Leave the font as we found it, so anything drawn later (or by a test
+  // sketch) isn't silently rendered in TomThumb.
+  display->setFont(NULL);
 
   // Frame complete — show it. With double_buff on, nothing drawn above has
   // been visible until this call.
@@ -246,20 +536,5 @@ void drawStepsScreen(unsigned long steps) {
   display->setTextSize(2);
   display->setCursor(2, 16);
   display->print(steps);
-  display->flipDMABuffer();
-}
-
-void drawDbScreen(int dbLevel) {
-  display->clearScreen();
-  uint16_t color = display->color565(255, 100, 255);
-  display->setTextColor(color);
-  display->setTextSize(1);
-  display->setCursor(2, 4);
-  display->print("VOLUME");
-
-  // simple bar graph
-  int barWidth = map(dbLevel, 0, 100, 0, 60);
-  display->fillRect(2, 18, barWidth, 8, color);
-  display->drawRect(2, 18, 60, 8, display->color565(80, 80, 80));
   display->flipDMABuffer();
 }

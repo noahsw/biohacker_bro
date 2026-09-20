@@ -6,15 +6,15 @@
     - WatangTech ESP32-S3 HUB75 RGB Matrix Controller
     - Waveshare 64x32 RGB LED Matrix Panel (HUB75, 2.5mm pitch)
     - Whoop strap (HR Broadcast enabled in Whoop app) — read via BLE
-    - GY-521 (MPU-6050) accelerometer — wired to IO45 (SDA) / IO46 (SCL)
-    - Onboard mic (ES7210 codec) — for relative decibel level
+    - GY-521 (MPU-6050) accelerometer — on the I2C expansion connector,
+      IO1 (SDA) / IO2 (SCL). NOT IO45/IO46; see config.h for why.
 
   What this does:
     - Connects ONLY to your specific Whoop (filtered by MAC address, so it
       ignores anyone else's Whoop broadcasting nearby at the party)
     - Shows ONE fixed screen (no cycling): live BPM in your current HR
       zone's color, a heart icon beating in time with your actual heart
-      rate, a step count, and a zone bar along the bottom two rows over a
+      rate, a step count, and a zone bar along the top two rows under a
       permanently-lit 5-segment zone legend
     - Counts steps in real time using the accelerometer
 
@@ -23,8 +23,6 @@
     - config.h          — all pins/constants you may need to edit
     - ble_heart_rate.*   — Whoop BLE heart-rate client
     - steps.*            — MPU6050 step counting
-    - mic.*              — decibel/mic level (sampled but no longer shown;
-                           kept for a future ambient-reactive effect)
     - display_ui.*       — HUB75 panel setup + the main screen layout
   See wokwi_test_ble/ and wokwi_test_display_steps/ for smaller sketches that
   simulate just one subsystem at a time (they reuse these same files via
@@ -63,7 +61,6 @@
 #include "config.h"
 #include "ble_heart_rate.h"
 #include "steps.h"
-#include "mic.h"
 #include "display_ui.h"
 
 // ============================================================================
@@ -81,14 +78,12 @@ void setup() {
 
   displaySetup();
   stepSetup();
-  micSetup();
   bleSetup();
 }
 
 void loop() {
   bleLoop();
   stepLoop();
-  micLoop(); // still sampled so the mic subsystem stays warm; not displayed
   updateHeartbeatPhase(currentBPM);
 
   drawMainScreen(currentBPM, hrConnected, stepCount);
