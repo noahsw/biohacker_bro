@@ -22,8 +22,9 @@ const int LEGEND_Y     = 31;
 unsigned long lastBeatTime = 0;
 
 // Lower bound of each zone, plus the ceiling of the top zone. Indexed by
-// zone number, so zoneFloor[z]..zoneFloor[z+1] is zone z's BPM range.
-const int zoneFloor[6] = { 0, ZONE1_BPM, ZONE2_BPM, ZONE3_BPM, ZONE4_BPM, ZONE_MAX_BPM };
+// zone number, so zoneFloor[z]..zoneFloor[z+1] is zone z's BPM range. Note
+// that zone 0 starts at REST_BPM rather than 0 — see config.h.
+const int zoneFloor[6] = { REST_BPM, ZONE1_BPM, ZONE2_BPM, ZONE3_BPM, ZONE4_BPM, ZONE_MAX_BPM };
 
 // The zone ramp, as it appears on the legend and the bar. Ordered so
 // PERCEIVED brightness climbs the whole way up — dim neutral, bright neutral,
