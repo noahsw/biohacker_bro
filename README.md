@@ -130,11 +130,48 @@ was split:
    "Arduino ESP32 Boards" — that one only covers the Arduino Nano ESP32).
 3. Library Manager → install **"ESP32 HUB75 LED MATRIX PANEL DMA
    Display"** by MrCodetastic (pulls in Adafruit GFX as a dependency),
-   plus **Adafruit MPU6050** and **Adafruit Unified Sensor**.
+   plus **Adafruit MPU6050**, **Adafruit Unified Sensor**, and
+   **NimBLE-Arduino** by h2zero (tested on 2.5.1 — required, see the
+   Whoop/MTU note under Gotchas).
 4. Board settings: **ESP32S3 Dev Module**, USB CDC On Boot: **Enabled**,
    Flash Size: **16MB**, PSRAM: **OPI PSRAM** (this board uses Octal, not
    Quad), Partition Scheme: one of the 16M options with a few MB of app
    space.
-5. Before flashing: fill in `TARGET_WHOOP_MAC` in the sketch with the
-   real Whoop's MAC address (found via a one-time BLE scan in a quiet
-   room, e.g. using the LightBlue or nRF Connect app).
+5. Before flashing: copy `secrets.h.example` to `secrets.h` and fill in
+   the real Whoop MAC (found by flashing `find_whoop_mac/` and watching
+   Serial Monitor at 115200). `secrets.h` is gitignored.
+
+   On Noah's machine the real file lives at
+   `~/.config/biohacker_bro/secrets.h` and each worktree symlinks to it;
+   the SessionStart hook in `.claude/settings.json` creates that symlink
+   automatically. See `secrets.h.example`.
+
+## Gotchas found on real hardware
+
+**The Whoop connects, but the bundled ESP32 BLE library says it failed.**
+The core's built-in `BLE` library always calls `ble_gattc_exchange_mtu()`
+as soon as the link comes up. The Whoop performs the MTU exchange itself
+the instant it connects, so that call returns `BLE_HS_EALREADY`
+(`status=2`), which the bundled library treats as a fatal error — while
+leaving the BLE link open. Every retry then fails instantly with
+`Client busy, connected to ...` against its own live connection, so it
+looks like the Whoop is refusing you when it is actually already
+connected. (The link reported `MTU=247` already negotiated, which is the
+proof.)
+
+The fix, and the reason for the NimBLE-Arduino dependency, is
+`client->connect(&device, true, false, /*exchangeMTU=*/false)` in
+`ble_heart_rate.cpp`.
+
+Two things this is NOT, both of which were ruled out by instrumenting the
+failure rather than guessing:
+- It is not your phone holding the connection. Whoop's HR Broadcast
+  serves several centrals at once — that is why a Peloton shows your HR
+  while the Whoop app is open. Leave your phone's Bluetooth on.
+- It is not a connectability or address-type problem. The strap
+  advertises `advType=0 CONN_ADV` with `addrType=1` (random static), and
+  the library handles that correctly.
+
+**`find_whoop_mac/` still uses the bundled BLE library**, which is fine —
+scanning works there and the two libraries are only a problem if a single
+sketch includes both. Do not add `NimBLEDevice.h` to that sketch.
