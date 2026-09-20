@@ -86,7 +86,18 @@
 // history and in the README's "What got cut" section rather than sitting here
 // as dead defines.
 
-// --- 5. HR zone thresholds (BPM) ---
+// --- 5. Step count head start ---
+// The wearer does not arrive at the party having taken zero steps, and a
+// chest display reading "0 STEPS" at 9pm undercuts the joke. Steps counted
+// during the night are ADDED to this.
+//
+// This is a prop offset, not a measurement, and it is the honest place to say
+// so: the number on the panel is this constant plus a jolt count from a
+// threshold detector that cannot tell dancing from walking. Set it to 0 if
+// you ever want the raw count.
+#define STEP_COUNT_START 5000
+
+// --- 6. HR zone thresholds (BPM) ---
 // Calibrated to the actual wearer, not to a generic training chart: resting
 // HR is 55 and hard dancing peaks around 110. A stock chart would put 110 in
 // zone 1 and the bar would sit dead-left all night.

@@ -19,10 +19,11 @@
   (too curvy), seven-segment (too blocky) and FreeMonoBold18pt (63px for three
   digits, so no room for the heart).
 
-  The first 8 seconds after reset are a SOLID PANEL TEST — white, then red.
-  The BPM number is the only element crossing rows 15/16, where the panel's
-  two scan halves meet, so a seam there looks like a font bug. On a solid fill
-  it has nowhere to hide.
+  A solid-panel test used to run for the first 8 seconds here, to rule out a
+  panel fault when glyphs looked like they had pixels missing. It did its job
+  (the panel is clean; the artefacts were the seven-segment renderer) and has
+  been removed. drawSolidTest() is still in display_ui if it's ever needed
+  again — call it from setup() and hold.
 
   The BPM sweep covers the full zone range so the zone colors, the bar fill
   and the digit-width changes at 99->100 can all be checked in one pass. It is
@@ -52,7 +53,7 @@ int sweepBpm();   // defined below
 // digit shape gets shown three times at a readable dwell. The sweep is for
 // checking zone colours and the bar; the parade is for checking glyphs.
 int simulatedBpm() {
-  unsigned long t = millis() - 8000;           // solid test occupies the first 8s
+  unsigned long t = millis();
   if ((t / 10000) % 2 == 1) {                  // parade for 10s in every 20
     int k = 1 + (int)((t % 10000) / 1100);     // 1..9
     if (k > 9) k = 9;
@@ -101,26 +102,6 @@ void setup() {
 
 void loop() {
   stepLoop();
-
-  // --- First 8 seconds: solid white, then solid red, 4s each.
-  //
-  // This is the "strip of dead pixels" test. The BPM number is the only
-  // element that crosses rows 15/16, where this panel's two scan halves meet,
-  // so a seam there shows up ONLY through the number and looks like a font
-  // bug. On a solid fill it has nowhere to hide: if a dark line appears, the
-  // panel or the driver config is at fault and no font change will help.
-  if (millis() < 8000) {
-    bool white = millis() < 4000;
-    drawSolidTest(white ? 200 : 200, white ? 200 : 0, white ? 200 : 0);
-    static unsigned long lastNote = 0;
-    if (millis() - lastNote > 1500) {
-      lastNote = millis();
-      Serial.printf("SOLID TEST (%s) - look for a dark row near y=15/16\r\n",
-                    white ? "white" : "red");
-    }
-    delay(20);
-    return;
-  }
 
   int bpm = simulatedBpm();
   updateHeartbeatPhase(bpm);           // drives the heart's pulse envelope

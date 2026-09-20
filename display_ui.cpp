@@ -15,11 +15,11 @@ MatrixPanel_I2S_DMA *display = nullptr;
 // ============================================================================
 //   y0                the fixed 5-segment zone legend, lit at all times
 //   y1..2             the 2px-tall live HR bar (current zone's color)
-//   x?..41,  y5..18   BPM, built-in 5x7 at size 2, right-aligned, zone-colored
-//   x45..61, y5..19   heart, pulsing in brightness on each beat (tops flush
+//   x?..36,  y5..18   BPM, built-in 5x7 at size 2, right-aligned, zone-colored
+//   x40..56, y5..19   heart, pulsing in brightness on each beat (tops flush
 //                     with the digits; the point hangs one row below)
-//   x?..41,  y24..30  step count, built-in 5x7, right-aligned, 2px ticks
-//   x43..61, y26..30  "STEPS", TomThumb 3x5, dim
+//   x?..36,  y24..30  step count, built-in 5x7, right-aligned, 2px ticks
+//   x39..57, y26..30  "STEPS", TomThumb 3x5, dim
 //
 // Vertical budget is roughly 10 / 60 / 30: three rows of gauge, nineteen of
 // heart rate, ten of steps. The gauge is on TOP, touching the heart rate and
@@ -53,10 +53,13 @@ const int LEGEND_Y     = 0;
 
 // Both numbers share this right edge, in the left-hand column.
 //
-// Width budget across the 64px row, right to left: 2px right margin, 17px
-// heart, 3px gap, and 42px of digits ending here at x41. The 2px margin is
-// deliberate — flush to x63 the heart read as falling off the panel.
-const int NUM_RIGHT_X  = 41;
+// Everything except the gauge sits 5px left of where the width budget alone
+// would put it. Packed hard against the right edge the whole block looked
+// shunted over, because the numbers are right-aligned: the left margin grows
+// as the BPM drops to two digits, so the content is at its most lopsided
+// exactly when you're resting and looking at it. The gauge spans the full
+// width and is unaffected.
+const int NUM_RIGHT_X  = 36;
 // FreeSans12pt7b is baseline-positioned; 21 - 17 (cap height) = top row 4.
 // Baseline 19, not 18: FreeMonoBold12pt7b's digits have a -14 yOffset and are
 // 15 tall, so this puts them on rows 5..19 — exactly the rows a scale-4 heart
@@ -74,11 +77,13 @@ const int STEPS_TOP_Y  = 24;
 // TomThumb is baseline-positioned; 31 - 5 = top row 26.
 const int STEPS_LABEL_BASELINE_Y = 31;
 // Right-hand column: heart above, "STEPS" below.
-const int HEART_CX     = 53;
+const int HEART_CX     = 48;
 const int HEART_CY     = 11;
 const int HEART_SCALE  = 4;
-const float HEART_FLOOR = 0.15f;  // brightness between beats; see drawMainScreen
-const int LABEL_X      = 43;  // "STEPS" right edge lines up with the heart's
+const float HEART_FLOOR = 0.35f;  // brightness between beats; see drawMainScreen
+// "STEPS" sits 2px clear of the step count (which ends at x36) rather than
+// 1px: at 3x5 the label crowded the number badly enough to read as one token.
+const int LABEL_X      = 39;
 
 unsigned long lastBeatTime = 0;
 
@@ -263,6 +268,25 @@ float expDecay(float tMs, float tauMs) {
   return expf(-tMs / tauMs);
 }
 
+// Decay constants are deliberately slower than a real heart's mechanics.
+//
+// At 150ms/120ms the envelope was physiologically closer, but at a RESTING
+// 55bpm that's a 150ms flash every 1.1 seconds -- measured on hardware as a
+// clean 0.00..1.00 swing at 62fps, so the code was right and it still read as
+// a flicker rather than a heartbeat. The eye wants a rise and fall it can
+// follow, not a strobe.
+//
+// The original envelope, restored after three attempts at "improving" it all
+// came out worse on the panel. Lub-dub: a sharp contraction decaying over
+// ~150ms, a smaller second beat at 280ms, then quiet. At 60bpm you see a
+// distinct double-thump with a rest; by 170bpm they merge into a flutter.
+//
+// THE TRAP, which cost three rounds: an earlier version squared this envelope
+// to deepen the apparent pulse. Squaring an exponential HALVES its time
+// constant -- exp(-t/260)^2 is exp(-t/130) -- so every attempt to lengthen
+// the decay was silently cancelled and then some, and the pulse kept coming
+// out snappier the longer the tau was set. If you touch these constants,
+// check what the brightness mapping in drawMainScreen does to them first.
 float beatIntensity() {
   float t = (float)(millis() - lastBeatTime);
   float i = expDecay(t, 150.0f) + 0.45f * expDecay(t - 280.0f, 120.0f);
@@ -364,7 +388,15 @@ void updateHeartbeatPhase(int bpm) {
   unsigned long beatIntervalMs = 60000UL / bpm;
   unsigned long now = millis();
   if (now - lastBeatTime >= beatIntervalMs) {
-    lastBeatTime = now;
+    // Advance by exactly one interval rather than snapping to now. The loop
+    // runs on a 15ms tick, so `lastBeatTime = now` rounded every beat up to
+    // 15ms late and the error accumulated -- the heart ran perhaps 1.5% slow
+    // forever. Small, but it's free to be exact.
+    lastBeatTime += beatIntervalMs;
+    // Resync if we've fallen more than a whole beat behind, which happens
+    // when the BPM jumps or the loop stalls. Without this the heart would
+    // machine-gun through the backlog catching up.
+    if (now - lastBeatTime > beatIntervalMs) lastBeatTime = now;
   }
 }
 
@@ -410,32 +442,19 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
   // work (it's a shape, and it is the heart rate), and it's a two-line change
   // if you ever want it, but with a heart on the panel two pulsing things
   // would compete.
-  // Brightness curve, tuned on hardware. The envelope itself was never the
-  // problem — it swings 0.10..1.00, confirmed by printing heartBeatLevel() on
-  // the real panel — but mapping it linearly onto a 0.35 floor made a 3x
-  // change in emitted light read as almost constant. LEDs are perceived
-  // roughly logarithmically, so the top of the range is where the eye is
-  // least sensitive, and a scale-5 heart puts more lit area on the panel,
-  // which raises the eye's adaptation level and flattens it further.
-  //
-  // Squaring the envelope pushes the quiet phase down where the eye still has
-  // resolution, and the lower floor widens the swing. HEART_FLOOR stays above
-  // zero so it glows between beats rather than blinking off.
-  //
-  // These two numbers are the knobs if it still looks wrong on your chest:
-  // floor down or exponent up for a sharper thump, the reverse for a gentler
-  // one. Judge it on the panel, never in a simulator.
+  // Linear, with a 0.35 floor: the original, restored. A squared curve with a
+  // lower floor was tried to make the pulse deeper and read as jerky -- see
+  // the note on beatIntensity(), which that squaring was also secretly
+  // halving. The heart glows and surges rather than blinking.
   uint16_t heartColor;
   if (connected) {
-    float env = beatIntensity();
-    float level = HEART_FLOOR + (1.0f - HEART_FLOOR) * (env * env);
+    float level = HEART_FLOOR + (1.0f - HEART_FLOOR) * beatIntensity();
     heartColor = display->color565((int)(255 * level), (int)(20 * level), (int)(20 * level));
   } else {
     heartColor = display->color565(50, 0, 0);
   }
   // scale 4 spans [cy-6, cy+8] = 15 rows, so cy=11 puts it on rows 5..19 and
-  // x45..61: the same 15-row height as the digits, with 2px of margin to the
-  // panel edge. Dropped from scale 5 to make that margin fit; the number and
+  // x40..56: the same 15-row height as the digits. Dropped from scale 5 to make that margin fit; the number and
   // the heart being the same height is worth more than 3px of heart.
   //
   // NOT bounding-box aligned with the digits (rows 4..20), on purpose. The

@@ -5,7 +5,7 @@
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
 
-unsigned long stepCount = 0;
+unsigned long stepCount = STEP_COUNT_START;
 
 namespace {
 
