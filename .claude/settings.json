@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "SRC=\"$HOME/.config/biohacker_bro/secrets.h\"; DST=\"$CLAUDE_PROJECT_DIR/secrets.h\"; if [ -f \"$SRC\" ] && { [ -L \"$DST\" ] || [ ! -e \"$DST\" ]; }; then ln -sfn \"$SRC\" \"$DST\"; fi; exit 0"
+          }
+        ]
+      }
+    ]
+  }
+}
