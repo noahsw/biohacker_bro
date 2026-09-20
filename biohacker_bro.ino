@@ -12,19 +12,20 @@
   What this does:
     - Connects ONLY to your specific Whoop (filtered by MAC address, so it
       ignores anyone else's Whoop broadcasting nearby at the party)
-    - Displays live BPM with a heart icon that beats in time with your
-      actual heart rate, colored by HR zone (green/yellow/red)
+    - Shows ONE fixed screen (no cycling): live BPM in your current HR
+      zone's color, a heart icon beating in time with your actual heart
+      rate, a step count, and a zone bar along the bottom two rows over a
+      permanently-lit 5-segment zone legend
     - Counts steps in real time using the accelerometer
-    - Shows a relative "party volume" bar from the onboard mic
-    - Cycles through HR / Steps / Decibels on the display
 
   Code is split across a few files so each subsystem can be understood (and
   tested) on its own:
     - config.h          — all pins/constants you may need to edit
     - ble_heart_rate.*   — Whoop BLE heart-rate client
     - steps.*            — MPU6050 step counting
-    - mic.*              — decibel/mic level (placeholder until I2S pins known)
-    - display_ui.*       — HUB75 panel setup + the three screens
+    - mic.*              — decibel/mic level (sampled but no longer shown;
+                           kept for a future ambient-reactive effect)
+    - display_ui.*       — HUB75 panel setup + the main screen layout
   See wokwi_test_ble/ and wokwi_test_display_steps/ for smaller sketches that
   simulate just one subsystem at a time (they reuse these same files via
   symlinks — no duplicated code).
@@ -66,17 +67,14 @@
 #include "display_ui.h"
 
 // ============================================================================
-// DISPLAY CYCLING
-// ============================================================================
-
-enum DisplayMode { MODE_HR, MODE_STEPS, MODE_DB };
-DisplayMode currentMode = MODE_HR;
-unsigned long lastModeSwitch = 0;
-const unsigned long MODE_DURATION_MS = 4000; // 4 seconds per screen
-
-// ============================================================================
 // SETUP / LOOP
 // ============================================================================
+//
+// One screen, always showing the same thing — no rotation. The panel is worn
+// on a costume, where anyone glancing at it gets about one second of
+// attention: a display that cycles guarantees that second lands on the wrong
+// screen. So HR, steps and zone all live on the one layout at once. See
+// display_ui.cpp for the pixel budget that makes them fit.
 
 void setup() {
   Serial.begin(115200);
@@ -85,28 +83,15 @@ void setup() {
   stepSetup();
   micSetup();
   bleSetup();
-
-  lastModeSwitch = millis();
 }
 
 void loop() {
   bleLoop();
   stepLoop();
-  int dbLevel = micLoop();
+  micLoop(); // still sampled so the mic subsystem stays warm; not displayed
   updateHeartbeatPhase(currentBPM);
 
-  // Cycle screens every few seconds
-  unsigned long now = millis();
-  if (now - lastModeSwitch > MODE_DURATION_MS) {
-    lastModeSwitch = now;
-    currentMode = (DisplayMode)((currentMode + 1) % 3);
-  }
+  drawMainScreen(currentBPM, hrConnected, stepCount);
 
-  switch (currentMode) {
-    case MODE_HR:    drawHRScreen(currentBPM, hrConnected); break;
-    case MODE_STEPS: drawStepsScreen(stepCount);            break;
-    case MODE_DB:    drawDbScreen(dbLevel);                 break;
-  }
-
-  delay(30); // ~30fps-ish refresh of our drawing logic
+  delay(15); // ~60fps, so the heart's brightness envelope stays smooth
 }

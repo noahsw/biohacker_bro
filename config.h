@@ -61,3 +61,26 @@
 #define MIC_WS_PIN    21
 #define MIC_DATA_PIN  47
 #define MIC_CONFIGURED false  // flip to true once real audio is confirmed
+
+// --- 5. HR zone thresholds (BPM) ---
+// Calibrated to the actual wearer, not to a generic training chart: resting
+// HR is 55 and hard dancing peaks around 110. A stock chart would put 110 in
+// zone 1 and the bar would sit dead-left all night.
+//
+// REST_BPM is the bar's zero point, not just zone 0's label. Anchoring the
+// scale at 0bpm would mean sitting still already showed the bar 80% of the
+// way through zone 0 — the bar should be empty when you're doing nothing.
+//
+//   Z0 55-69 | Z1 70-84 | Z2 85-99 | Z3 100-114 | Z4/5 115+
+//
+// Even 15bpm bands, placing a 110bpm peak about two-thirds through zone 3:
+// visibly, comfortably in Z3 with headroom left, so a big night can still
+// tip into red without Z4 being unreachable.
+#define REST_BPM  55
+#define ZONE1_BPM 70
+#define ZONE2_BPM 85
+#define ZONE3_BPM 100
+#define ZONE4_BPM 115
+// The top of the Z4/5 band, used only to compute progress ACROSS that last
+// segment of the bar (there's no zone above it to spill into).
+#define ZONE_MAX_BPM 140

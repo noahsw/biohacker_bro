@@ -61,9 +61,11 @@ static void solidColourTest() {
   for (auto &s : screens) {
     LOGPORT.printf("solid test: expecting %s\r\n", s.name);
     display->fillScreen(display->color565(s.r, s.g, s.b));
+    display->flipDMABuffer(); // double buffering is on: nothing shows until the flip
     delay(2000);
   }
   display->clearScreen();
+  display->flipDMABuffer();
 }
 
 static bool beginOk = false;
@@ -76,18 +78,12 @@ static void printDiagnostics() {
   LOGPORT.printf("panel: %dx%d chain=%d brightness=90\r\n", PANEL_WIDTH, PANEL_HEIGHT, PANEL_CHAIN);
 }
 
-enum DisplayMode { MODE_HR, MODE_STEPS, MODE_DB };
-DisplayMode currentMode = MODE_HR;
-unsigned long lastModeSwitch = 0;
-const unsigned long MODE_DURATION_MS = 4000;
-
 void setup() {
   LOGPORT.begin(115200);
   delay(2000); // give USB CDC time to enumerate, or the first lines are lost
   LOGPORT.println("Booting...");
   beginOk = displaySetup();
   printDiagnostics();
-  lastModeSwitch = millis();
 }
 
 void loop() {
@@ -97,30 +93,22 @@ void loop() {
   return;
 #endif
 
-  // Fake data standing in for the Whoop/MPU6050/mic, purely to exercise
-  // every screen's drawing code.
-  int fakeBpm = 90 + (int)(50 * sin(millis() / 2000.0));
+  // Fake data standing in for the Whoop/MPU6050. The BPM sweeps slowly from
+  // 70 up past 175 and back, which walks the zone bar through all five
+  // segments — the quickest way to eyeball that the legend colors, the bar's
+  // within-zone progress and the BPM text color all agree with each other.
+  int fakeBpm = 122 + (int)(55 * sin(millis() / 6000.0));
   unsigned long fakeSteps = millis() / 500;
-  int fakeDb = 30 + (millis() / 100) % 50;
 
   updateHeartbeatPhase(fakeBpm);
+  drawMainScreen(fakeBpm, true, fakeSteps);
 
   unsigned long now = millis();
-  if (now - lastModeSwitch > MODE_DURATION_MS) {
-    lastModeSwitch = now;
-    currentMode = (DisplayMode)((currentMode + 1) % 3);
-  }
-
-  switch (currentMode) {
-    case MODE_HR:    drawHRScreen(fakeBpm, true);  break;
-    case MODE_STEPS: drawStepsScreen(fakeSteps);   break;
-    case MODE_DB:    drawDbScreen(fakeDb);         break;
-  }
 
   static unsigned long lastLog = 0;
   if (now - lastLog > 1000) {
     lastLog = now;
-    LOGPORT.printf("loop alive: mode=%d bpm=%d steps=%lu db=%d\r\n", currentMode, fakeBpm, fakeSteps, fakeDb);
+    LOGPORT.printf("loop alive: bpm=%d zone=%d steps=%lu\r\n", fakeBpm, hrZone(fakeBpm), fakeSteps);
   }
 
   delay(30);
