@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "author": "Noah Spitzer-Williams",
+  "editor": "wokwi",
+  "parts": [
+    { "id": "esp", "type": "board-esp32-s3-devkitc-1", "top": 100, "left": 0, "attrs": {} },
+    { "id": "matrix", "type": "wokwi-hub75-matrix", "top": -220, "left": 0, "attrs": { "rows": "32", "cols": "64" } }
+  ],
+  "connections": [
+    [ "esp:4",  "matrix:R1",  "red",    [] ],
+    [ "esp:5",  "matrix:G1",  "green",  [] ],
+    [ "esp:6",  "matrix:B1",  "blue",   [] ],
+    [ "esp:7",  "matrix:R2",  "red",    [] ],
+    [ "esp:15", "matrix:G2",  "green",  [] ],
+    [ "esp:16", "matrix:B2",  "blue",   [] ],
+    [ "esp:17", "matrix:A",   "orange", [] ],
+    [ "esp:18", "matrix:B",   "orange", [] ],
+    [ "esp:8",  "matrix:C",   "orange", [] ],
+    [ "esp:3",  "matrix:D",   "orange", [] ],
+    [ "esp:41", "matrix:CLK", "yellow", [] ],
+    [ "esp:40", "matrix:LAT", "purple", [] ],
+    [ "esp:39", "matrix:OE",  "purple", [] ],
+    [ "esp:GND.1","matrix:GND", "black",  [] ],
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ]
+  ]
+}
