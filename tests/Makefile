@@ -16,7 +16,9 @@ BUILD    := build
 # in the make output before you've read a single line of test text.
 HR_SOURCES    := test_hr_zones.cpp $(ROOT)/hr_zones.cpp
 STEPS_SOURCES := test_steps_layout.cpp   # steps_layout.h is header-only
-BINARIES      := $(BUILD)/test_hr_zones $(BUILD)/test_steps_layout
+HRLAYOUT_SOURCES := test_hr_layout.cpp   # hr_layout.h is header-only too
+BINARIES      := $(BUILD)/test_hr_zones $(BUILD)/test_steps_layout \
+                 $(BUILD)/test_hr_layout
 
 # The binary is rebuilt unconditionally rather than by timestamp. It's a
 # single-file compile that takes well under a second, and make's 1-second
@@ -32,6 +34,7 @@ test: compile
 compile: | $(ROOT)/secrets.h $(BUILD)
 	@$(CXX) $(CXXFLAGS) -o $(BUILD)/test_hr_zones $(HR_SOURCES)
 	@$(CXX) $(CXXFLAGS) -o $(BUILD)/test_steps_layout $(STEPS_SOURCES)
+	@$(CXX) $(CXXFLAGS) -o $(BUILD)/test_hr_layout $(HRLAYOUT_SOURCES)
 
 $(BUILD):
 	@mkdir -p $(BUILD)
