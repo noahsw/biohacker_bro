@@ -82,6 +82,17 @@ const int SEVENSEG_W = 9, SEVENSEG_H = 16, SEVENSEG_T = 2, SEVENSEG_GAP = 2;
 const int STEPS_TOP_Y  = 24;
 // TomThumb is baseline-positioned; 31 - 5 = top row 26.
 const int STEPS_LABEL_BASELINE_Y = 31;
+// Steps are green, and specifically not blue. Blue is Z2's color on both the
+// legend and the bar, so a blue step count read as a heart-rate element that
+// had wandered to the bottom of the panel — the only two numbers up there are
+// already easy to confuse, and sharing a hue with a zone made it worse. Green
+// appears nowhere in the zone ramp, so it can't be misread as a zone, and it
+// stays clear of Z3's yellow.
+//
+// The label is held at roughly 45% of the count's value for the same reason it
+// is 3x5 and not 5x7: a label should never out-shout its number.
+const uint16_t STEPS_COLOR_RGB[3]       = {0, 210, 80};
+const uint16_t STEPS_LABEL_COLOR_RGB[3] = {0, 95, 40};
 // Blank columns between the step count and the word "STEPS". Held constant so
 // the pair reads as one token no matter how many digits the count has: at 3x5
 // a 1px gap crowded the label into the number badly enough that they merged.
@@ -119,17 +130,25 @@ uint16_t zonePalette(int zone) {
 // Consequence worth knowing: at equal brightness, "gray" and "white" ARE the
 // same color, so Z0 and Z1 can't be told apart in the number and both render
 // white. That's the right trade — the number's job is to be readable at rest,
-// and the bar below already says which of the two you're in. The blue and red
-// are lifted off their pure primaries for the same reason: a pure (0,110,255)
-// numeral is noticeably harder to read than a yellow one at the same nominal
-// value, because blue LEDs carry the least perceived brightness.
+// and the bar below already says which of the two you're in. The blue is
+// lifted off its pure primary to buy legibility: a pure (0,110,255) numeral is
+// noticeably harder to read than a yellow one at the same nominal value,
+// because blue LEDs carry the least perceived brightness.
+//
+// Z4's red is NOT lifted, though it was. (255,70,70) read as pink on the panel
+// and plainly failed to match the red bar above it — which is the one thing
+// the top zone's color has to do, since bar and number are 4px apart and the
+// eye compares them directly. Red LEDs are bright enough that the lift bought
+// very little here anyway, and a same-hue-different-color pair looks like a
+// bug, not like emphasis. Any change to this value should be checked against
+// zonePalette's red side by side, not judged on its own.
 uint16_t zoneTextPalette(int zone) {
   switch (zone) {
     case 0:  return display->color565(255, 255, 255); // white
     case 1:  return display->color565(255, 255, 255); // white (see above)
     case 2:  return display->color565(80, 165, 255);  // blue, lifted
     case 3:  return display->color565(255, 205, 0);   // yellow
-    default: return display->color565(255, 70, 70);   // red, lifted
+    default: return display->color565(255, 30, 30);   // red, matching the bar
   }
 }
 
@@ -565,10 +584,13 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
   int blockX = (PANEL_WIDTH - blockW) / 2;
 
   drawStepCount(shownSteps, blockX + countW - 1, STEPS_TOP_Y,
-                display->color565(0, 180, 255));
+                display->color565(STEPS_COLOR_RGB[0], STEPS_COLOR_RGB[1],
+                                  STEPS_COLOR_RGB[2]));
 
   display->setFont(&TomThumb);
-  display->setTextColor(display->color565(0, 90, 130));
+  display->setTextColor(display->color565(STEPS_LABEL_COLOR_RGB[0],
+                                          STEPS_LABEL_COLOR_RGB[1],
+                                          STEPS_LABEL_COLOR_RGB[2]));
   display->setCursor(blockX + countW + STEPS_GAP - lbx, STEPS_LABEL_BASELINE_Y);
   display->print("STEPS");
 
@@ -583,7 +605,8 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
 
 void drawStepsScreen(unsigned long steps) {
   display->clearScreen();
-  uint16_t color = display->color565(0, 180, 255);
+  uint16_t color = display->color565(STEPS_COLOR_RGB[0], STEPS_COLOR_RGB[1],
+                                     STEPS_COLOR_RGB[2]);
   display->setTextColor(color);
   display->setTextSize(1);
   display->setCursor(2, 4);
