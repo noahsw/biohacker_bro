@@ -1,6 +1,7 @@
 #include "display_ui.h"
 #include "config.h"
 #include "hr_zones.h"
+#include "steps_layout.h"   // the bottom row's geometry, shared with tests/
 
 #include <Fonts/FreeSans12pt7b.h>
 #include <Fonts/FreeSansBold12pt7b.h>
@@ -93,10 +94,10 @@ const int STEPS_LABEL_BASELINE_Y = 31;
 // is 3x5 and not 5x7: a label should never out-shout its number.
 const uint16_t STEPS_COLOR_RGB[3]       = {0, 210, 80};
 const uint16_t STEPS_LABEL_COLOR_RGB[3] = {0, 95, 40};
-// Blank columns between the step count and the word "STEPS". Held constant so
-// the pair reads as one token no matter how many digits the count has: at 3x5
-// a 1px gap crowded the label into the number badly enough that they merged.
-const int STEPS_GAP   = 2;
+// STEPS_GAP, the blank columns between the count and the word, lives in
+// steps_layout.h with the rest of that row's arithmetic. It is 2 rather than 1
+// because at 3x5 a single column crowded the label into the number badly
+// enough that the two read as one token.
 // The heart, to the right of the BPM.
 const int HEART_CX     = 48;
 const int HEART_CY     = 12;
@@ -180,18 +181,6 @@ void drawHeart(int cx, int cy, int scale, uint16_t color) {
 //
 // Drawn digit by digit rather than with print() because GFX has no way to
 // vary advance mid-string; the separator has to be positioned by hand.
-const int DIGIT_ADVANCE = 6;  // built-in font: 5px glyph + 1px gap
-const int SEP_ADVANCE   = 3;  // 2px tick + 1px gap
-
-// How wide drawStepCount() will render `value`, so the caller can position the
-// count and its label as one block without drawing anything first.
-int stepCountWidth(unsigned long value) {
-  char digits[12];
-  int n = snprintf(digits, sizeof(digits), "%lu", value);
-  int seps = (n - 1) / 3;
-  return n * DIGIT_ADVANCE - 1 + seps * SEP_ADVANCE;
-}
-
 void drawStepCount(unsigned long value, int rightEdge, int topY, uint16_t color) {
   char digits[12];
   int n = snprintf(digits, sizeof(digits), "%lu", value);
@@ -207,12 +196,12 @@ void drawStepCount(unsigned long value, int rightEdge, int topY, uint16_t color)
       // before it rather than as a stray dot between two numbers.
       display->drawPixel(x + 1, topY + 5, color);
       display->drawPixel(x,     topY + 6, color);
-      x += SEP_ADVANCE;
+      x += STEPS_SEP_ADVANCE;
     }
     // bg == color puts drawChar in transparent mode (GFX only fills a
     // background when the two differ), so the ticks aren't painted over.
     display->drawChar(x, topY, digits[i], color, color, 1);
-    x += DIGIT_ADVANCE;
+    x += STEPS_DIGIT_ADVANCE;
   }
 }
 
@@ -560,16 +549,12 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
   // grows — acceptable here, because the steps only ever climb and nobody
   // watches that digit the way they watch a BPM.
   //
-  // Capped at 5 digits (so, "99,999"): far beyond a party's worth of walking,
-  // and a number that sticks degrades more gracefully than one that silently
-  // outgrows its column.
-  //
   // The label is 3x5 rather than the 5x7 used everywhere else: at 5x7 the word
   // is 30px and leaves no room for the count beside it, and it's a label,
   // which should never out-shout its number. Dim for the same reason.
   //
   // Labelled while the BPM isn't — see the layout note above.
-  unsigned long shownSteps = steps > 99999UL ? 99999UL : steps;
+  unsigned long shownSteps = steps > STEPS_MAX ? STEPS_MAX : steps;
   int countW = stepCountWidth(shownSteps);
 
   // Ask GFX for the label's rendered width rather than assuming 4px an advance;
@@ -580,10 +565,9 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
   display->getTextBounds("STEPS", 0, STEPS_LABEL_BASELINE_Y, &lbx, &lby, &lbw,
                          &lbh);
 
-  int blockW = countW + STEPS_GAP + (int)lbw;
-  int blockX = (PANEL_WIDTH - blockW) / 2;
+  int blockX = stepsBlockX(countW, (int)lbw, PANEL_WIDTH);
 
-  drawStepCount(shownSteps, blockX + countW - 1, STEPS_TOP_Y,
+  drawStepCount(shownSteps, stepCountRightX(blockX, countW), STEPS_TOP_Y,
                 display->color565(STEPS_COLOR_RGB[0], STEPS_COLOR_RGB[1],
                                   STEPS_COLOR_RGB[2]));
 
@@ -591,7 +575,7 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
   display->setTextColor(display->color565(STEPS_LABEL_COLOR_RGB[0],
                                           STEPS_LABEL_COLOR_RGB[1],
                                           STEPS_LABEL_COLOR_RGB[2]));
-  display->setCursor(blockX + countW + STEPS_GAP - lbx, STEPS_LABEL_BASELINE_Y);
+  display->setCursor(stepsLabelX(blockX, countW) - lbx, STEPS_LABEL_BASELINE_Y);
   display->print("STEPS");
 
   // Leave the font as we found it, so anything drawn later (or by a test
