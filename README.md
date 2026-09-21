@@ -51,7 +51,7 @@ readable across a room," not accuracy.
 | Display | Waveshare RGB Matrix Panel, 2.5mm pitch, 64×32 pixels | HUB75 interface, connects via included ribbon cable. Wants 5V, 2.5A minimum / 4A recommended for full brightness. |
 | Heart rate source | Whoop strap | HR Broadcast mode enabled in the Whoop app — broadcasts the **standard Bluetooth Heart Rate Service (0x180D)**, same protocol used by gym equipment. Whoop does NOT expose steps, HRV, recovery, etc. over this BLE service — only HR. |
 | Accelerometer (steps) | GY-521 breakout (MPU-6050), **pre-soldered headers** | Buy the pre-soldered kind. Plugs into the board's 4-pin I2C expansion connector (IO1/IO2) via a JST-SH-to-female-sockets cable — no soldering anywhere. Run it at **3.3V**, never 5V. |
-| Power | Anker 537 PowerCore 24K (24,000mAh) | **One** USB-C cable, into the board input silkscreened **`USB-C`** — confirmed on hardware, running board + panel for over an hour. The board's second input is silkscreened **`Power`** and is currently unused. The panel is fed from the board's **VH-4P (3.96mm) 5V/4A output** either way — that is the board's designed panel path and the only one; the ribbon does not carry panel power. The panel asks 5V/2.5A min via its VH4 header, and wants 4A for full brightness. At plain 5V (not higher PD voltages) an Anker port maxes around 3A (~15W), so a single cable is under the panel's full-brightness figure and is working because this display runs a dark background at moderate brightness. See the Power headroom note under Known unknowns. |
+| Power | Anker 537 PowerCore 24K (24,000mAh) | **One** USB-C cable, into the board input silkscreened **`USB-C`**. That port is the one that feeds everything: per the vendor, it is "for board power, matrix power, and program download/debugging", while the second input (`Power`) is "dedicated for powering the HUB75 RGB LED matrix only". So the two inputs are NOT interchangeable — `Power` alone leaves the ESP32 unpowered and the whole thing dead, confirmed on hardware. The panel is fed from the board's **VH-4P (3.96mm) 5V/4A output** in both cases; the ribbon never carries panel power. The panel asks 5V/2.5A min via its VH4 header and 4A for full brightness, and an Anker port caps near 3A at plain 5V (not higher PD voltages) — so the second cable into `Power` exists to give the matrix its own supply when one port isn't enough. At this project's brightness it is not needed: one cable has run board + panel for over an hour at party brightness. |
 
 **Runtime estimate:** 24,000mAh × 3.7V ≈ 88.8Wh, ~75-80Wh usable after
 USB-C conversion losses. At a realistic draw for this display (dark
@@ -118,7 +118,8 @@ traps (G1 is the lower GPIO, and E stays -1 on a 1/16-scan panel).
 
 **Panel power:** not from the ribbon — via the board's VH-4P 5V/4A output to
 the panel's VH4 input. One USB-C cable into the board's `USB-C` input feeds
-both the ESP32 and that VH-4P output; the second input (`Power`) is spare.
+both the ESP32 and that VH-4P output. Do **not** use the `Power` input on its
+own: it feeds the matrix only, so the ESP32 never boots and nothing lights up.
 See the Power row in the hardware table.
 
 ## Software architecture
@@ -192,22 +193,17 @@ the display breathes with the room rather than showing a number.
   guess. Needs real-world tuning once worn, since stride and mounting
   position affect it. `steps_bringup/` exists to make that tuning
   measurable rather than a bisection search — see below.
-- **Power headroom on a single cable is unmeasured.** One USB-C cable into
-  the `USB-C` input runs the whole thing, confirmed over an hour on the
-  bench. What that does NOT establish: an Anker port caps near 3A at plain
-  5V, the panel's own spec asks 4A for full brightness, and the ESP32 is
-  drawing off the same cable. The margin comes from this display being
-  mostly dark background at moderate brightness, so it is a property of
-  what's on screen, not of the wiring — a brighter layout eats it. The
-  failure mode is a brownout reset mid-party, not a dim panel.
-  Two things would settle it, and neither has been done: an hour at *party*
-  brightness against the bank's remaining charge (which also checks the
-  runtime estimate above), and whether the two USB-C inputs are actually
-  commoned on the board. They are documented as separate rails by the
-  vendor, but one cable demonstrably powers both, so either they are
-  bridged or the `Power` input is downstream of `USB-C`. Nobody has read a
-  schematic. Until someone does, the second cable is the known-good
-  headroom option rather than a redundant one.
+- **Runtime past an hour is unmeasured.** One cable into `USB-C` has run
+  board + panel for an hour at the brightness the costume will actually use,
+  so power *adequacy* at this operating point is settled — it is not a
+  bench-brightness result that falls over on the night. What is still open
+  is duration: an hour is not five, and the 7-13 hour figure above is an
+  estimate from a nameplate capacity, not a measurement. Run it at this
+  brightness and check the bank's remaining charge against elapsed time; that
+  is the one number that turns the estimate into a fact.
+  If it ever does come up short, the fix is the second cable into `Power`,
+  which gives the matrix its own supply instead of sharing the `USB-C`
+  port's ~3A with the ESP32.
 
 - **The MPU6050 has not been run on real hardware yet.** The move to the
   I2C expansion connector (IO1/IO2) is reasoned from the vendor wiki and
