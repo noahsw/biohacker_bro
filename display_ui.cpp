@@ -1,6 +1,7 @@
 #include "display_ui.h"
 #include "config.h"
 #include "hr_zones.h"
+#include "steps_layout.h"   // the bottom row's geometry, shared with tests/
 
 #include <Fonts/FreeSans12pt7b.h>
 #include <Fonts/FreeSansBold12pt7b.h>
@@ -15,11 +16,12 @@ MatrixPanel_I2S_DMA *display = nullptr;
 // ============================================================================
 //   y0                the fixed 5-segment zone legend, lit at all times
 //   y1..2             the 2px-tall live HR bar (current zone's color)
-//   x?..36,  y5..18   BPM, built-in 5x7 at size 2, right-aligned, zone-colored
-//   x40..56, y5..19   heart, pulsing in brightness on each beat (tops flush
+//   x?..36,  y6..19   BPM, built-in 5x7 at size 2, right-aligned, zone-colored
+//   x40..56, y6..20   heart, pulsing in brightness on each beat (tops flush
 //                     with the digits; the point hangs one row below)
-//   x?..36,  y24..30  step count, built-in 5x7, right-aligned, 2px ticks
-//   x39..57, y26..30  "STEPS", TomThumb 3x5, dim
+//   y24..30           step count, built-in 5x7, 2px ticks, and
+//   y26..30           "STEPS" in TomThumb 3x5 and dim, the two measured
+//                     together 2px apart and centred on the 64px width
 //
 // Vertical budget is roughly 10 / 60 / 30: three rows of gauge, nineteen of
 // heart rate, ten of steps. The gauge is on TOP, touching the heart rate and
@@ -27,9 +29,10 @@ MatrixPanel_I2S_DMA *display = nullptr;
 // on a panel this size that says which number a gauge belongs to. Sandwiched
 // between the two numbers it would touch both and mean neither.
 //
-// Two columns: both numbers right-aligned to x39, heart and "STEPS" stacked
-// in the right-hand column. Right-aligning is what keeps a number still as it
-// gains or loses a digit — the ones column never moves.
+// The heart-rate row is two columns: the number right-aligned to x36 with the
+// heart beside it. Right-aligning is what keeps the BPM still as it gains or
+// loses a digit — the ones column never moves. The steps row is one centred
+// block instead: count and label together, so the pair stays balanced.
 //
 // The BPM is unlabelled and the steps are labelled, which is deliberate: the
 // heart beside the number says "heart rate" better than three letters would,
@@ -60,30 +63,46 @@ const int LEGEND_Y     = 0;
 // exactly when you're resting and looking at it. The gauge spans the full
 // width and is unaffected.
 const int NUM_RIGHT_X  = 36;
-// FreeSans12pt7b is baseline-positioned; 21 - 17 (cap height) = top row 4.
-// Baseline 19, not 18: FreeMonoBold12pt7b's digits have a -14 yOffset and are
-// 15 tall, so this puts them on rows 5..19 — exactly the rows a scale-4 heart
-// at cy=11 occupies. Number and heart are flush top and bottom, no fudge.
-const int BPM_BASELINE_Y = 19;
-// Built-in font is top-positioned, and 14px tall at size 2: rows 5..18.
-const int BPM_BUILTIN_TOP_Y = 5;
-// Seven-segment is drawn from its top row: rows 3..18, one taller than
+// FreeSans12pt7b is baseline-positioned; 22 - 17 (cap height) = top row 5.
+// Baseline 20, not 19: FreeMonoBold12pt7b's digits have a -14 yOffset and are
+// 15 tall, so this puts them on rows 6..20 — exactly the rows a scale-4 heart
+// at cy=12 occupies. Number and heart are flush top and bottom, no fudge.
+//
+// The whole heart-rate row (number, heart, seven-seg) sits one row lower than
+// it first did: with the gauge on rows 0..2 it was crowding the bar, and the
+// spare row was below it, not above.
+const int BPM_BASELINE_Y = 20;
+// Built-in font is top-positioned, and 14px tall at size 2: rows 6..19.
+const int BPM_BUILTIN_TOP_Y = 6;
+// Seven-segment is drawn from its top row: rows 4..19, one taller than
 // FreeMonoBold's 15. Its two bowls are identical rectangles by construction,
 // so an 8 cannot come out lopsided the way a rasterised one can.
-const int SEVENSEG_TOP_Y = 3;
+const int SEVENSEG_TOP_Y = 4;
 const int SEVENSEG_W = 9, SEVENSEG_H = 16, SEVENSEG_T = 2, SEVENSEG_GAP = 2;
 // Built-in font is top-positioned.
 const int STEPS_TOP_Y  = 24;
 // TomThumb is baseline-positioned; 31 - 5 = top row 26.
 const int STEPS_LABEL_BASELINE_Y = 31;
-// Right-hand column: heart above, "STEPS" below.
+// Steps are green, and specifically not blue. Blue is Z2's color on both the
+// legend and the bar, so a blue step count read as a heart-rate element that
+// had wandered to the bottom of the panel — the only two numbers up there are
+// already easy to confuse, and sharing a hue with a zone made it worse. Green
+// appears nowhere in the zone ramp, so it can't be misread as a zone, and it
+// stays clear of Z3's yellow.
+//
+// The label is held at roughly 45% of the count's value for the same reason it
+// is 3x5 and not 5x7: a label should never out-shout its number.
+const uint16_t STEPS_COLOR_RGB[3]       = {0, 210, 80};
+const uint16_t STEPS_LABEL_COLOR_RGB[3] = {0, 95, 40};
+// STEPS_GAP, the blank columns between the count and the word, lives in
+// steps_layout.h with the rest of that row's arithmetic. It is 2 rather than 1
+// because at 3x5 a single column crowded the label into the number badly
+// enough that the two read as one token.
+// The heart, to the right of the BPM.
 const int HEART_CX     = 48;
-const int HEART_CY     = 11;
+const int HEART_CY     = 12;
 const int HEART_SCALE  = 4;
 const float HEART_FLOOR = 0.35f;  // brightness between beats; see drawMainScreen
-// "STEPS" sits 2px clear of the step count (which ends at x36) rather than
-// 1px: at 3x5 the label crowded the number badly enough to read as one token.
-const int LABEL_X      = 39;
 
 unsigned long lastBeatTime = 0;
 
@@ -112,17 +131,25 @@ uint16_t zonePalette(int zone) {
 // Consequence worth knowing: at equal brightness, "gray" and "white" ARE the
 // same color, so Z0 and Z1 can't be told apart in the number and both render
 // white. That's the right trade — the number's job is to be readable at rest,
-// and the bar below already says which of the two you're in. The blue and red
-// are lifted off their pure primaries for the same reason: a pure (0,110,255)
-// numeral is noticeably harder to read than a yellow one at the same nominal
-// value, because blue LEDs carry the least perceived brightness.
+// and the bar below already says which of the two you're in. The blue is
+// lifted off its pure primary to buy legibility: a pure (0,110,255) numeral is
+// noticeably harder to read than a yellow one at the same nominal value,
+// because blue LEDs carry the least perceived brightness.
+//
+// Z4's red is NOT lifted, though it was. (255,70,70) read as pink on the panel
+// and plainly failed to match the red bar above it — which is the one thing
+// the top zone's color has to do, since bar and number are 4px apart and the
+// eye compares them directly. Red LEDs are bright enough that the lift bought
+// very little here anyway, and a same-hue-different-color pair looks like a
+// bug, not like emphasis. Any change to this value should be checked against
+// zonePalette's red side by side, not judged on its own.
 uint16_t zoneTextPalette(int zone) {
   switch (zone) {
     case 0:  return display->color565(255, 255, 255); // white
     case 1:  return display->color565(255, 255, 255); // white (see above)
     case 2:  return display->color565(80, 165, 255);  // blue, lifted
     case 3:  return display->color565(255, 205, 0);   // yellow
-    default: return display->color565(255, 70, 70);   // red, lifted
+    default: return display->color565(255, 30, 30);   // red, matching the bar
   }
 }
 
@@ -155,13 +182,9 @@ void drawHeart(int cx, int cy, int scale, uint16_t color) {
 // Drawn digit by digit rather than with print() because GFX has no way to
 // vary advance mid-string; the separator has to be positioned by hand.
 void drawStepCount(unsigned long value, int rightEdge, int topY, uint16_t color) {
-  const int DIGIT_ADVANCE = 6;  // built-in font: 5px glyph + 1px gap
-  const int SEP_ADVANCE   = 3;  // 2px tick + 1px gap
-
   char digits[12];
   int n = snprintf(digits, sizeof(digits), "%lu", value);
-  int seps  = (n - 1) / 3;
-  int width = n * DIGIT_ADVANCE - 1 + seps * SEP_ADVANCE;
+  int width = stepCountWidth(value);
 
   display->setFont(NULL);
   display->setTextSize(1);
@@ -173,12 +196,12 @@ void drawStepCount(unsigned long value, int rightEdge, int topY, uint16_t color)
       // before it rather than as a stray dot between two numbers.
       display->drawPixel(x + 1, topY + 5, color);
       display->drawPixel(x,     topY + 6, color);
-      x += SEP_ADVANCE;
+      x += STEPS_SEP_ADVANCE;
     }
     // bg == color puts drawChar in transparent mode (GFX only fills a
     // background when the two differ), so the ticks aren't painted over.
     display->drawChar(x, topY, digits[i], color, color, 1);
-    x += DIGIT_ADVANCE;
+    x += STEPS_DIGIT_ADVANCE;
   }
 }
 
@@ -453,11 +476,11 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
   } else {
     heartColor = display->color565(50, 0, 0);
   }
-  // scale 4 spans [cy-6, cy+8] = 15 rows, so cy=11 puts it on rows 5..19 and
+  // scale 4 spans [cy-6, cy+8] = 15 rows, so cy=12 puts it on rows 6..20 and
   // x40..56: the same 15-row height as the digits. Dropped from scale 5 to make that margin fit; the number and
   // the heart being the same height is worth more than 3px of heart.
   //
-  // NOT bounding-box aligned with the digits (rows 4..20), on purpose. The
+  // NOT bounding-box aligned with the digits (rows 5..21), on purpose. The
   // heart is two fat lobes tapering to a point, so its area sits high in its
   // own box: with the boxes aligned it read as floating above the number.
   // Integrating the two discs against the triangle puts the heart's centre of
@@ -468,7 +491,7 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
 
   // --- BPM, in the current zone's hue at a constant brightness.
   // Free font: the y argument is the BASELINE. Cap height is 17, so a baseline
-  // of 21 puts the digits on rows 4..20.
+  // of 22 puts the digits on rows 5..21.
   uint16_t bpmColor = connected ? zoneColor(bpm) : display->color565(70, 70, 70);
   if (connected) {
     snprintf(buf, sizeof(buf), "%d", bpm);
@@ -477,8 +500,8 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
   }
 
   if (bpmStyle == BPM_BUILTIN_2) {
-    // Built-in font: y is the TOP row, not the baseline, so 5 puts the 14px
-    // digits on rows 5..18 against the heart's 5..19 — tops flush, the
+    // Built-in font: y is the TOP row, not the baseline, so 6 puts the 14px
+    // digits on rows 6..19 against the heart's 6..20 — tops flush, the
     // heart's point hanging one row below, which is the same relationship the
     // heart has always had to the digits here.
     display->setFont(NULL);
@@ -488,7 +511,7 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
     display->setTextSize(1);
   } else if (bpmStyle == BPM_SEVEN_SEG) {
     // Laid out by hand rather than through GFX: 11px cells with a 2px gap,
-    // right-aligned on the same x39 edge as everything else. "--" while
+    // right-aligned on the same x36 edge as the other BPM styles. "--" while
     // disconnected becomes middle bars only, which is what a real instrument
     // with no signal shows.
     const int CW = SEVENSEG_W, CH = SEVENSEG_H, CT = SEVENSEG_T;
@@ -515,25 +538,44 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
     printRightAligned(buf, NUM_RIGHT_X, BPM_BASELINE_Y);
   }
 
-  // --- Step count, right-aligned under the BPM on the same x39 edge.
-  // Built-in font: y is the TOP row, so 24 puts it on rows 24..30.
+  // --- Step count and "STEPS", centred in the panel as ONE block.
   //
-  // Capped at 5 digits (so, "99,999"): far beyond a party's worth of walking,
-  // and a number that sticks degrades more gracefully than one that silently
-  // outgrows its column.
-  drawStepCount(steps > 99999UL ? 99999UL : steps, NUM_RIGHT_X, STEPS_TOP_Y,
-                display->color565(0, 180, 255));
-
-  // --- "STEPS", in the right-hand column under the heart.
+  // The count is not right-aligned to the BPM's edge: the pair is measured
+  // together, always STEPS_GAP apart, and the whole thing is centred on the
+  // 64px width. So the number-plus-word reads as a single unit that stays
+  // balanced under the heart-rate row, and a digit gained or lost moves both
+  // halves outward by half a pixel's worth rather than shoving the label
+  // sideways. The cost is that the count's ones column drifts as the number
+  // grows — acceptable here, because the steps only ever climb and nobody
+  // watches that digit the way they watch a BPM.
   //
-  // 3x5 rather than the 5x7 used everywhere else: at 5x7 the word is 30px and
-  // won't fit beside the count in this column, and it's a label, which should
-  // never out-shout its number. Dim for the same reason.
+  // The label is 3x5 rather than the 5x7 used everywhere else: at 5x7 the word
+  // is 30px and leaves no room for the count beside it, and it's a label,
+  // which should never out-shout its number. Dim for the same reason.
   //
   // Labelled while the BPM isn't — see the layout note above.
+  unsigned long shownSteps = steps > STEPS_MAX ? STEPS_MAX : steps;
+  int countW = stepCountWidth(shownSteps);
+
+  // Ask GFX for the label's rendered width rather than assuming 4px an advance;
+  // bx is its left side bearing, which has to come back out when positioning.
   display->setFont(&TomThumb);
-  display->setTextColor(display->color565(0, 90, 130));
-  display->setCursor(LABEL_X, STEPS_LABEL_BASELINE_Y);
+  int16_t lbx, lby;
+  uint16_t lbw, lbh;
+  display->getTextBounds("STEPS", 0, STEPS_LABEL_BASELINE_Y, &lbx, &lby, &lbw,
+                         &lbh);
+
+  int blockX = stepsBlockX(countW, (int)lbw, PANEL_WIDTH);
+
+  drawStepCount(shownSteps, stepCountRightX(blockX, countW), STEPS_TOP_Y,
+                display->color565(STEPS_COLOR_RGB[0], STEPS_COLOR_RGB[1],
+                                  STEPS_COLOR_RGB[2]));
+
+  display->setFont(&TomThumb);
+  display->setTextColor(display->color565(STEPS_LABEL_COLOR_RGB[0],
+                                          STEPS_LABEL_COLOR_RGB[1],
+                                          STEPS_LABEL_COLOR_RGB[2]));
+  display->setCursor(stepsLabelX(blockX, countW) - lbx, STEPS_LABEL_BASELINE_Y);
   display->print("STEPS");
 
   // Leave the font as we found it, so anything drawn later (or by a test
@@ -547,7 +589,8 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
 
 void drawStepsScreen(unsigned long steps) {
   display->clearScreen();
-  uint16_t color = display->color565(0, 180, 255);
+  uint16_t color = display->color565(STEPS_COLOR_RGB[0], STEPS_COLOR_RGB[1],
+                                     STEPS_COLOR_RGB[2]);
   display->setTextColor(color);
   display->setTextSize(1);
   display->setCursor(2, 4);

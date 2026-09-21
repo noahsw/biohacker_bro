@@ -12,7 +12,11 @@ CXXFLAGS ?= -std=c++17 -Wall -Wextra -Werror -O1
 ROOT     := ..
 BUILD    := build
 
-SOURCES := test_hr_zones.cpp $(ROOT)/hr_zones.cpp
+# One binary per subject. Keeping them separate means a failure names the area
+# in the make output before you've read a single line of test text.
+HR_SOURCES    := test_hr_zones.cpp $(ROOT)/hr_zones.cpp
+STEPS_SOURCES := test_steps_layout.cpp   # steps_layout.h is header-only
+BINARIES      := $(BUILD)/test_hr_zones $(BUILD)/test_steps_layout
 
 # The binary is rebuilt unconditionally rather than by timestamp. It's a
 # single-file compile that takes well under a second, and make's 1-second
@@ -20,11 +24,14 @@ SOURCES := test_hr_zones.cpp $(ROOT)/hr_zones.cpp
 # PREVIOUS build — which is a genuinely confusing way to be told your change
 # did nothing.
 .PHONY: test clean compile
+# Every binary runs even if an earlier one fails, so one broken area doesn't
+# hide the state of the others; the recipe still exits non-zero if any failed.
 test: compile
-	@$(BUILD)/test_hr_zones
+	@rc=0; for t in $(BINARIES); do $$t || rc=1; echo; done; exit $$rc
 
 compile: | $(ROOT)/secrets.h $(BUILD)
-	@$(CXX) $(CXXFLAGS) -o $(BUILD)/test_hr_zones $(SOURCES)
+	@$(CXX) $(CXXFLAGS) -o $(BUILD)/test_hr_zones $(HR_SOURCES)
+	@$(CXX) $(CXXFLAGS) -o $(BUILD)/test_steps_layout $(STEPS_SOURCES)
 
 $(BUILD):
 	@mkdir -p $(BUILD)
