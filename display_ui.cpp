@@ -90,10 +90,11 @@ const int STEPS_LABEL_BASELINE_Y = 31;
 // appears nowhere in the zone ramp, so it can't be misread as a zone, and it
 // stays clear of Z3's yellow.
 //
-// The label is held at roughly 45% of the count's value for the same reason it
-// is 3x5 and not 5x7: a label should never out-shout its number.
+// The label shares the count's color; its smaller 3x5 face is what keeps it
+// from out-shouting the number.
 const uint16_t STEPS_COLOR_RGB[3]       = {0, 210, 80};
-const uint16_t STEPS_LABEL_COLOR_RGB[3] = {0, 95, 40};
+const uint16_t STEPS_LABEL_COLOR_RGB[3] = {STEPS_COLOR_RGB[0], STEPS_COLOR_RGB[1],
+                                           STEPS_COLOR_RGB[2]};
 // STEPS_GAP, the blank columns between the count and the word, lives in
 // steps_layout.h with the rest of that row's arithmetic. It is 2 rather than 1
 // because at 3x5 a single column crowded the label into the number badly
