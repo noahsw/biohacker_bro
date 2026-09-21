@@ -51,7 +51,7 @@ readable across a room," not accuracy.
 | Display | Waveshare RGB Matrix Panel, 2.5mm pitch, 64×32 pixels | HUB75 interface, connects via included ribbon cable. Wants 5V, 2.5A minimum / 4A recommended for full brightness. |
 | Heart rate source | Whoop strap | HR Broadcast mode enabled in the Whoop app — broadcasts the **standard Bluetooth Heart Rate Service (0x180D)**, same protocol used by gym equipment. Whoop does NOT expose steps, HRV, recovery, etc. over this BLE service — only HR. |
 | Accelerometer (steps) | GY-521 breakout (MPU-6050), **pre-soldered headers** | Buy the pre-soldered kind. Plugs into the board's 4-pin I2C expansion connector (IO1/IO2) via a JST-SH-to-female-sockets cable — no soldering anywhere. Run it at **3.3V**, never 5V. |
-| Power | Anker 537 PowerCore 24K (24,000mAh) | Two USB-C ports feed the controller board's **two** USB-C inputs, which are separate rails ("Board" + "Panel"). The panel is then fed from the board's **VH-4P (3.96mm) 5V/4A output** — that is the board's designed panel path, and it keeps the panel's current off the ESP32's rail. The panel asks 5V/2.5A min via its VH4 header, so the 4A output covers it. At plain 5V (not higher PD voltages) each Anker port maxes around 3A (~15W). Estimated runtime well beyond the 5-hour party (see calc below). |
+| Power | Anker 537 PowerCore 24K (24,000mAh) | **One** USB-C cable, into the board input silkscreened **`USB-C`**. That port is the one that feeds everything: per the vendor, it is "for board power, matrix power, and program download/debugging", while the second input (`Power`) is "dedicated for powering the HUB75 RGB LED matrix only". So the two inputs are NOT interchangeable — `Power` alone leaves the ESP32 unpowered and the whole thing dead, confirmed on hardware. The panel is fed from the board's **VH-4P (3.96mm) 5V/4A output** in both cases; the ribbon never carries panel power. The panel asks 5V/2.5A min via its VH4 header and 4A for full brightness, and an Anker port caps near 3A at plain 5V (not higher PD voltages) — so the second cable into `Power` exists to give the matrix its own supply when one port isn't enough. At this project's brightness it is not needed: one cable has run board + panel for over an hour at party brightness. |
 
 **Runtime estimate:** 24,000mAh × 3.7V ≈ 88.8Wh, ~75-80Wh usable after
 USB-C conversion losses. At a realistic draw for this display (dark
@@ -117,7 +117,10 @@ lives in `config.h`; see Known Unknowns below for the source and the two
 traps (G1 is the lower GPIO, and E stays -1 on a 1/16-scan panel).
 
 **Panel power:** not from the ribbon — via the board's VH-4P 5V/4A output to
-the panel's VH4 input. See the Power row in the hardware table.
+the panel's VH4 input. One USB-C cable into the board's `USB-C` input feeds
+both the ESP32 and that VH-4P output. Do **not** use the `Power` input on its
+own: it feeds the matrix only, so the ESP32 never boots and nothing lights up.
+See the Power row in the hardware table.
 
 ## Software architecture
 
@@ -190,6 +193,18 @@ the display breathes with the room rather than showing a number.
   guess. Needs real-world tuning once worn, since stride and mounting
   position affect it. `steps_bringup/` exists to make that tuning
   measurable rather than a bisection search — see below.
+- **Runtime past an hour is unmeasured.** One cable into `USB-C` has run
+  board + panel for an hour at the brightness the costume will actually use,
+  so power *adequacy* at this operating point is settled — it is not a
+  bench-brightness result that falls over on the night. What is still open
+  is duration: an hour is not five, and the 7-13 hour figure above is an
+  estimate from a nameplate capacity, not a measurement. Run it at this
+  brightness and check the bank's remaining charge against elapsed time; that
+  is the one number that turns the estimate into a fact.
+  If it ever does come up short, the fix is the second cable into `Power`,
+  which gives the matrix its own supply instead of sharing the `USB-C`
+  port's ~3A with the ESP32.
+
 - **The MPU6050 has not been run on real hardware yet.** The move to the
   I2C expansion connector (IO1/IO2) is reasoned from the vendor wiki and
   the board's own silkscreen, not yet confirmed by a sensor that
