@@ -1,6 +1,7 @@
 #include "display_ui.h"
 #include "config.h"
 #include "hr_zones.h"
+#include "hr_layout.h"      // the BPM row's geometry, shared with tests/
 #include "steps_layout.h"   // the bottom row's geometry, shared with tests/
 
 #include <Fonts/FreeSans12pt7b.h>
@@ -16,9 +17,11 @@ MatrixPanel_I2S_DMA *display = nullptr;
 // ============================================================================
 //   y0                the fixed 5-segment zone legend, lit at all times
 //   y1..2             the 2px-tall live HR bar (current zone's color)
-//   x?..36,  y6..19   BPM, built-in 5x7 at size 2, right-aligned, zone-colored
-//   x40..56, y6..20   heart, pulsing in brightness on each beat (tops flush
-//                     with the digits; the point hangs one row below)
+//   y6..19            BPM, built-in 5x7 at size 2, zone-colored, and
+//   y6..20            the heart, pulsing in brightness on each beat (tops
+//                     flush with the digits; the point hangs one row below),
+//                     the two measured together 3px apart and centred on the
+//                     64px width
 //   y24..30           step count, built-in 5x7, 2px ticks, and
 //   y26..30           "STEPS" in TomThumb 3x5 and dim, the two measured
 //                     together 2px apart and centred on the 64px width
@@ -29,10 +32,14 @@ MatrixPanel_I2S_DMA *display = nullptr;
 // on a panel this size that says which number a gauge belongs to. Sandwiched
 // between the two numbers it would touch both and mean neither.
 //
-// The heart-rate row is two columns: the number right-aligned to x36 with the
-// heart beside it. Right-aligning is what keeps the BPM still as it gains or
-// loses a digit — the ones column never moves. The steps row is one centred
-// block instead: count and label together, so the pair stays balanced.
+// Both rows are one centred block: the BPM with its heart, the step count
+// with its label. Centring is what makes the two rows share an axis with each
+// other, so the panel reads as one column of information rather than a row
+// shoved right and a row in the middle. Within its block the BPM is still
+// right-aligned against the heart, so its digits grow leftwards.
+//
+// The price is that the heart slides half a digit when the BPM crosses 100.
+// That is a rare crossing on a night's wear, and a slow one when it happens.
 //
 // The BPM is unlabelled and the steps are labelled, which is deliberate: the
 // heart beside the number says "heart rate" better than three letters would,
@@ -44,8 +51,8 @@ MatrixPanel_I2S_DMA *display = nullptr;
 // nothing between, and at 21px three digits are 54px wide, leaving no room for
 // a heart. FreeSans12pt7b is 17px tall in 39px. It's also the only 17px sans
 // here whose digits all share one 13px advance — FreeSansBold's '1' is a pixel
-// WIDER than its other digits, which would shuffle the number sideways every
-// time the hundreds digit appeared. Regular rather than bold was an aesthetic
+// WIDER than its other digits, which would shuffle the block sideways every
+// time a '1' appeared, on top of the digit-count shift centring already costs. Regular rather than bold was an aesthetic
 // call (instrument, not signage); the strokes differ by about one pixel, so
 // swapping to FreeSansBold12pt7b is a one-line change if it reads too thin on
 // the panel — but it needs the heart dropped to scale 4 to fit.
@@ -54,15 +61,6 @@ namespace {
 const int BAR_TOP_Y    = 1;   // bar occupies rows 1 and 2
 const int LEGEND_Y     = 0;
 
-// Both numbers share this right edge, in the left-hand column.
-//
-// Everything except the gauge sits 5px left of where the width budget alone
-// would put it. Packed hard against the right edge the whole block looked
-// shunted over, because the numbers are right-aligned: the left margin grows
-// as the BPM drops to two digits, so the content is at its most lopsided
-// exactly when you're resting and looking at it. The gauge spans the full
-// width and is unaffected.
-const int NUM_RIGHT_X  = 36;
 // FreeSans12pt7b is baseline-positioned; 22 - 17 (cap height) = top row 5.
 // Baseline 20, not 19: FreeMonoBold12pt7b's digits have a -14 yOffset and are
 // 15 tall, so this puts them on rows 6..20 — exactly the rows a scale-4 heart
@@ -99,8 +97,9 @@ const uint16_t STEPS_LABEL_COLOR_RGB[3] = {STEPS_COLOR_RGB[0], STEPS_COLOR_RGB[1
 // steps_layout.h with the rest of that row's arithmetic. It is 2 rather than 1
 // because at 3x5 a single column crowded the label into the number badly
 // enough that the two read as one token.
-// The heart, to the right of the BPM.
-const int HEART_CX     = 48;
+// The heart, to the right of the BPM. Its x centre is computed per frame by
+// hr_layout.h so the number-plus-heart block stays centred; only the row it
+// sits on and how big it is are fixed here.
 const int HEART_CY     = 12;
 const int HEART_SCALE  = 4;
 const float HEART_FLOOR = 0.35f;  // brightness between beats; see drawMainScreen
@@ -204,23 +203,6 @@ void drawStepCount(unsigned long value, int rightEdge, int topY, uint16_t color)
     display->drawChar(x, topY, digits[i], color, color, 1);
     x += STEPS_DIGIT_ADVANCE;
   }
-}
-
-// Draws text so its right edge lands on `rightEdge`, for whatever font is
-// currently set. Asks GFX for the rendered bounds rather than assuming a
-// character width: the built-in font is a fixed 6px per char, but a free font
-// is proportional and carries a left side bearing, so computing this by hand
-// gets it wrong by a pixel or two per string.
-//
-// `y` means different things per font, which is GFX's design, not ours: for
-// the built-in font it's the TOP row of the glyphs; for a free font it's the
-// BASELINE, with the glyphs sitting above it. Callers below say which.
-void printRightAligned(const char *text, int rightEdge, int y) {
-  int16_t bx, by;
-  uint16_t bw, bh;
-  display->getTextBounds(text, 0, y, &bx, &by, &bw, &bh);
-  display->setCursor(rightEdge - bw - bx + 1, y);
-  display->print(text);
 }
 
 // --- Seven-segment digits -------------------------------------------------
@@ -456,6 +438,54 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
     }
   }
 
+  // --- BPM and heart, measured together and centred as ONE block.
+  //
+  // Same treatment as the steps row below, and for the same reason: a centred
+  // pair reads as one unit, and the two rows line up on the panel's centre
+  // instead of the heart-rate row hanging off to the right of it. The number
+  // stays right-aligned WITHIN the block, so its digits still grow leftwards
+  // away from the heart.
+  //
+  // The cost is that the heart shifts by half a digit when the BPM crosses
+  // 100. Accepted: crossing 100 is either a one-way trip for the night or a
+  // brief excursion, so the heart is not going to flicker back and forth, and
+  // the row being centred is worth a rare 6px slide.
+  uint16_t bpmColor = connected ? zoneColor(bpm) : display->color565(70, 70, 70);
+  if (connected) {
+    snprintf(buf, sizeof(buf), "%d", bpm);
+  } else {
+    snprintf(buf, sizeof(buf), "--");
+  }
+
+  // Width of the number as it will actually render, which needs the font set
+  // first — so the style is selected here and the drawing below just uses it.
+  // The seven-segment style is laid out by hand, so its width is arithmetic
+  // rather than measured.
+  int16_t nbx = 0, nby;
+  uint16_t nbw = 0, nbh;
+  int numW;
+  if (bpmStyle == BPM_SEVEN_SEG) {
+    int n = (int)strlen(buf);
+    numW = n * SEVENSEG_W + (n - 1) * SEVENSEG_GAP;
+  } else {
+    switch (bpmStyle) {
+      case BPM_BUILTIN_2: display->setFont(NULL); display->setTextSize(2); break;
+      case BPM_SANS_BOLD: display->setFont(&FreeSansBold12pt7b); break;
+      case BPM_MONO_BOLD: display->setFont(&FreeMonoBold12pt7b); break;
+      default:            display->setFont(&FreeSans12pt7b);     break;
+    }
+    // y only matters for the bounds' origin, not their width; pass the y this
+    // style will actually be drawn at so bx/bw come back for the real cursor.
+    int measureY = (bpmStyle == BPM_BUILTIN_2) ? BPM_BUILTIN_TOP_Y : BPM_BASELINE_Y;
+    display->getTextBounds(buf, 0, measureY, &nbx, &nby, &nbw, &nbh);
+    numW = (int)nbw;
+    display->setTextSize(1);
+  }
+
+  const int heartW = hrHeartWidth(HEART_SCALE);
+  const int hrBlkX = hrBlockX(numW, heartW, PANEL_WIDTH);
+  const int numRightX = hrNumRightX(hrBlkX, numW);
+
   // --- Heart: always red (it's a heart), pulsing in brightness on each beat.
   // Dimmed to a dark ember while we're still hunting for the strap, so a
   // stale reading can never look live.
@@ -477,9 +507,10 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
   } else {
     heartColor = display->color565(50, 0, 0);
   }
-  // scale 4 spans [cy-6, cy+8] = 15 rows, so cy=12 puts it on rows 6..20 and
-  // x40..56: the same 15-row height as the digits. Dropped from scale 5 to make that margin fit; the number and
-  // the heart being the same height is worth more than 3px of heart.
+  // scale 4 spans [cy-6, cy+8] = 15 rows, so cy=12 puts it on rows 6..20: the
+  // same 15-row height as the digits. Dropped from scale 5 to make that margin
+  // fit; the number and the heart being the same height is worth more than 3px
+  // of heart. The x centre now comes from the block, not a constant.
   //
   // NOT bounding-box aligned with the digits (rows 5..21), on purpose. The
   // heart is two fat lobes tapering to a point, so its area sits high in its
@@ -488,18 +519,10 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
   // area at about row 11, matching the digits' centre — so this is aligned by
   // MASS, which is what the eye measures, and the boxes sitting a row apart
   // is the price.
-  drawHeart(HEART_CX, HEART_CY, HEART_SCALE, heartColor);
+  drawHeart(hrHeartCX(hrBlkX, numW, HEART_SCALE), HEART_CY, HEART_SCALE,
+            heartColor);
 
-  // --- BPM, in the current zone's hue at a constant brightness.
-  // Free font: the y argument is the BASELINE. Cap height is 17, so a baseline
-  // of 22 puts the digits on rows 5..21.
-  uint16_t bpmColor = connected ? zoneColor(bpm) : display->color565(70, 70, 70);
-  if (connected) {
-    snprintf(buf, sizeof(buf), "%d", bpm);
-  } else {
-    snprintf(buf, sizeof(buf), "--");
-  }
-
+  // --- The number itself, in the current zone's hue at a constant brightness.
   if (bpmStyle == BPM_BUILTIN_2) {
     // Built-in font: y is the TOP row, not the baseline, so 6 puts the 14px
     // digits on rows 6..19 against the heart's 6..20 — tops flush, the
@@ -508,18 +531,18 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
     display->setFont(NULL);
     display->setTextSize(2);
     display->setTextColor(bpmColor);
-    printRightAligned(buf, NUM_RIGHT_X, BPM_BUILTIN_TOP_Y);
+    display->setCursor(numRightX - nbw - nbx + 1, BPM_BUILTIN_TOP_Y);
+    display->print(buf);
     display->setTextSize(1);
   } else if (bpmStyle == BPM_SEVEN_SEG) {
     // Laid out by hand rather than through GFX: 11px cells with a 2px gap,
-    // right-aligned on the same x36 edge as the other BPM styles. "--" while
+    // sharing the block's right edge with the other BPM styles. "--" while
     // disconnected becomes middle bars only, which is what a real instrument
     // with no signal shows.
     const int CW = SEVENSEG_W, CH = SEVENSEG_H, CT = SEVENSEG_T;
     const int GAP = SEVENSEG_GAP, TOP = SEVENSEG_TOP_Y;
     int n = (int)strlen(buf);
-    int totalW = n * CW + (n - 1) * GAP;
-    int x = NUM_RIGHT_X - totalW + 1;
+    int x = numRightX - numW + 1;
     for (int i = 0; i < n; i++) {
       int cx = x + i * (CW + GAP);
       if (buf[i] == '-') {
@@ -529,14 +552,11 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
       }
     }
   } else {
-    switch (bpmStyle) {
-      case BPM_SANS_BOLD: display->setFont(&FreeSansBold12pt7b); break;
-      case BPM_MONO_BOLD: display->setFont(&FreeMonoBold12pt7b); break;
-      default:            display->setFont(&FreeSans12pt7b);     break;
-    }
+    // Font already selected for the measurement above.
     display->setTextSize(1);
     display->setTextColor(bpmColor);
-    printRightAligned(buf, NUM_RIGHT_X, BPM_BASELINE_Y);
+    display->setCursor(numRightX - nbw - nbx + 1, BPM_BASELINE_Y);
+    display->print(buf);
   }
 
   // --- Step count and "STEPS", centred in the panel as ONE block.
