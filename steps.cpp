@@ -11,11 +11,16 @@ namespace {
 
 Adafruit_MPU6050 mpu;
 bool mpuOk = false;                 // false => stepLoop() is a no-op
-float accelBaseline = 9.8;       // roughly 1g at rest
+float accelBaseline = 9.8;       // 1g; seeded in stepSetup(), then tracked in stepLoop()
+unsigned long lastBaselineUpdate = 0;
+// Slow enough that a step's ~100ms spike barely moves it, fast enough to
+// follow a tilt: cheap GY-521s read a different "1g" per orientation, and on
+// real hardware tilting after boot left stillness reading ~1.1 m/s^2.
+const float BASELINE_TAU_MS = 2000.0f;
 bool stepArmed = true;
 unsigned long lastStepTime = 0;
-const unsigned long STEP_DEBOUNCE_MS = 250; // prevents double-counting one step
-const float STEP_THRESHOLD = 1.8;           // tune this after wearing it once
+const unsigned long STEP_DEBOUNCE_MS = 450; // <450 double-counted slow steps (land + push-off) on hardware
+const float STEP_THRESHOLD = 0.9;           // tuned on hardware: still <=0.3, steps 1.0-2.5
 
 } // namespace
 
@@ -31,6 +36,23 @@ void stepSetup() {
   } else {
     mpu.setAccelerometerRange(MPU6050_RANGE_4_G);
     mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
+
+    // Measure this sensor's own 1g instead of trusting 9.8: cheap GY-521s
+    // read ~1 m/s^2 off at rest, which on real hardware ate half of
+    // STEP_THRESHOLD and sat right on the re-arm level. Assumes the sensor
+    // is still for the ~0.5s after power-on.
+    float sum = 0.0f;
+    const int samples = 50;
+    for (int i = 0; i < samples; i++) {
+      sensors_event_t a, g, temp;
+      mpu.getEvent(&a, &g, &temp);
+      sum += sqrt(a.acceleration.x * a.acceleration.x +
+                  a.acceleration.y * a.acceleration.y +
+                  a.acceleration.z * a.acceleration.z);
+      delay(10);
+    }
+    accelBaseline = sum / samples;
+    lastBaselineUpdate = millis();
   }
 }
 
@@ -61,6 +83,12 @@ void stepLoop() {
   float delta = fabs(mag - accelBaseline);
 
   unsigned long now = millis();
+  float dt = (float)(now - lastBaselineUpdate);
+  lastBaselineUpdate = now;
+  float alpha = dt / BASELINE_TAU_MS;
+  if (alpha > 1.0f) alpha = 1.0f;
+  accelBaseline += (mag - accelBaseline) * alpha;
+
   if (delta > STEP_THRESHOLD && stepArmed && (now - lastStepTime) > STEP_DEBOUNCE_MS) {
     stepCount++;
     lastStepTime = now;
