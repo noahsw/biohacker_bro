@@ -17,8 +17,9 @@ BUILD    := build
 HR_SOURCES    := test_hr_zones.cpp $(ROOT)/hr_zones.cpp
 STEPS_SOURCES := test_steps_layout.cpp   # steps_layout.h is header-only
 HRLAYOUT_SOURCES := test_hr_layout.cpp   # hr_layout.h is header-only too
+DETECTOR_SOURCES := test_step_detector.cpp   # step_detector.h is header-only
 BINARIES      := $(BUILD)/test_hr_zones $(BUILD)/test_steps_layout \
-                 $(BUILD)/test_hr_layout
+                 $(BUILD)/test_hr_layout $(BUILD)/test_step_detector
 
 # The binary is rebuilt unconditionally rather than by timestamp. It's a
 # single-file compile that takes well under a second, and make's 1-second
@@ -35,6 +36,7 @@ compile: | $(ROOT)/secrets.h $(BUILD)
 	@$(CXX) $(CXXFLAGS) -o $(BUILD)/test_hr_zones $(HR_SOURCES)
 	@$(CXX) $(CXXFLAGS) -o $(BUILD)/test_steps_layout $(STEPS_SOURCES)
 	@$(CXX) $(CXXFLAGS) -o $(BUILD)/test_hr_layout $(HRLAYOUT_SOURCES)
+	@$(CXX) $(CXXFLAGS) -o $(BUILD)/test_step_detector $(DETECTOR_SOURCES)
 
 $(BUILD):
 	@mkdir -p $(BUILD)
