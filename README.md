@@ -266,9 +266,25 @@ without reflashing.
 
 ```bash
 FQBN="esp32:esp32:esp32s3:CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=app3M_fat9M_16MB"
-arduino-cli upload -b "$FQBN" -p /dev/cu.usbmodem201101 steps_bringup
-stty -f /dev/cu.usbmodem201101 115200 raw && cat /dev/cu.usbmodem201101
+arduino-cli compile --upload -b "$FQBN" -p /dev/cu.usbmodem201101 steps_bringup
+python3 tools/serial_monitor.py /dev/cu.usbmodem201101 45   # capture 45s
 ```
+
+`upload` alone fails with "Compiled sketch not found" unless the sketch was
+compiled first, hence `compile --upload`.
+
+For a tuning run: stand still ~5s, take exactly 20 counted steps, stand still
+until the capture ends. The still stretches bracket the walk in the log, so
+the count across it is unambiguous. First bring-up (hand-held) landed at
+still ≤0.3 m/s², steps 1.0–2.5, giving `STEP_THRESHOLD = 0.9` and 24 counted
+for 20. Two things found on the way:
+
+- **The at-rest "1g" is not 9.8, and it changes with tilt.** This GY-521 read
+  ~0.9 m/s² off at rest, and ~1.1 after being tilted post-boot — eating half
+  the old 1.8 threshold. `steps.cpp` now seeds the baseline at power-on and
+  tracks it with a 2s moving average, so stillness reads ~0.08 at any angle.
+- **Slow steps are two bumps** (heel strike, push-off). At 250–350ms debounce
+  a 1 step/s walk counted ~1.45× high; 450ms merges them.
 
 Mount the sensor where it will actually ride on the costume before tuning —
 chest versus pocket moves these numbers a lot.
