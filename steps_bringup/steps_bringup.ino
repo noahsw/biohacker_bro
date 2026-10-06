@@ -15,7 +15,7 @@
   already gone by the time a serial capture attaches (see README).
 
   Watch it with:
-    stty -f /dev/cu.usbmodem201101 115200 raw && cat /dev/cu.usbmodem201101
+    python3 tools/serial_monitor.py   (cat/stty print nothing: no DTR)
 */
 
 #include <Wire.h>
