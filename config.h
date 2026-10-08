@@ -97,6 +97,14 @@
 // you ever want the raw count.
 #define STEP_COUNT_START 5000
 
+// --- 5b. When "today" ends ---
+// The count is saved to flash and survives reboots and battery swaps, then
+// resets to STEP_COUNT_START when the date changes (read from the onboard
+// PCF85063 RTC, which is set from the build time each time you flash). The
+// day flips at this hour, local time: 0 = midnight. Set it to e.g. 4 if a
+// night out past midnight shouldn't snap back to 5000 at 12:00.
+#define DAY_ROLLOVER_HOUR 4
+
 // --- 6. HR zone thresholds (BPM) ---
 // Calibrated to the actual wearer, not to a generic training chart: resting
 // HR is 55 and hard dancing peaks around 110. A stock chart would put 110 in
