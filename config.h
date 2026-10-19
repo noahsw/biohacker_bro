@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdint.h>
+
 // ============================================================================
 // CONFIG — EDIT THESE
 // ============================================================================
@@ -104,6 +106,35 @@
 // day flips at this hour, local time: 0 = midnight. Set it to e.g. 4 if a
 // night out past midnight shouldn't snap back to 5000 at 12:00.
 #define DAY_ROLLOVER_HOUR 4
+
+// --- 5c. Brightness levels, set with the thumb wheel ---
+// Passed to setBrightness8(), 0-255. Roll the wheel (top edge, K1/K2/K3) for
+// brighter/dimmer, or press it in to step through and wrap; the choice is
+// saved across reboots. See brightness.h.
+// 90 is the level the one-cable power setup has been tested at for over an
+// hour. The top levels draw more current than a single Anker port is sure to
+// supply: if the panel flickers or the board resets at the brightest
+// settings, add the second cable into the `Power` input (see README).
+//
+// NOT round numbers, on purpose. The HUB75 library dims by shortening each
+// bit plane's on-time, rounded to whole pixel clocks, and at some settings
+// that rounding shortchanges the top bit plane: at 25 and 50 it gets ~31%
+// less on-time than it should, so red 128 shows DIMMER than red 127. The
+// heart's fade crosses that boundary every beat, and it read as a laggy,
+// stuttering pulse. 36 and 53 look the same as 25 and 50 but round evenly
+// (within 3%); 90, 140 and 200 are already within 5%. Check any new value
+// against setBrightnessOE() in the library before using it.
+const uint8_t BRIGHTNESS_LEVELS[] = {36, 53, 90, 140, 200};
+// Index into BRIGHTNESS_LEVELS used until the wheel saves a different one.
+#define BRIGHTNESS_DEFAULT_LEVEL 2
+// Which PCA9557 pin each wheel motion is. The wiki gives K1 = IO1,
+// K2 = IO3, K3 = IO2, but not which K is up, down or press — this is the
+// usual layout for these switches (the middle label is the push), UNVERIFIED.
+// The serial log names each key as it's used: if rolling up dims the panel,
+// swap UP and DOWN; if the push doesn't cycle, move it to the right K.
+#define BRIGHT_KEY_UP_BIT    1   // K1
+#define BRIGHT_KEY_PRESS_BIT 3   // K2
+#define BRIGHT_KEY_DOWN_BIT  2   // K3
 
 // --- 6. HR zone thresholds (BPM) ---
 // Calibrated to the actual wearer, not to a generic training chart: resting

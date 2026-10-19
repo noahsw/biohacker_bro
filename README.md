@@ -146,6 +146,13 @@ subsystems:
    the current zone's hue, the step count, and the zone bar + legend.
    `drawStepsScreen()` / `drawDbScreen()` survive only for the isolated
    test sketches and are not used by the firmware.
+4. **Brightness** (`brightness.cpp`) — the 3-way thumb wheel at the top
+   edge of the board (silkscreened K1/K2/K3) sets the panel brightness at
+   the party: roll for brighter/dimmer, press to step through and wrap.
+   Five levels, `BRIGHTNESS_LEVELS` in `config.h`, saved to flash. For two
+   seconds after each change the step-count row shows `BRIGHT` and a row of
+   pips instead. The wheel is not on an ESP32 pin: it goes through the
+   onboard PCA9557 I2C expander, on the same bus as the MPU6050 and RTC.
 
 ## What got cut
 
@@ -205,6 +212,14 @@ the display breathes with the room rather than showing a number.
   which gives the matrix its own supply instead of sharing the `USB-C`
   port's ~3A with the ESP32.
 
+- **The thumb wheel has not been run on real hardware yet.** The vendor
+  wiki gives the PCA9557 pins (K1 = IO1, K2 = IO3, K3 = IO2) but neither
+  the chip's I2C address nor which K is up, down and press. The firmware
+  takes the first device answering in 0x19-0x1F (0x18 being the ES8311
+  codec) and logs the address at boot; each wheel event logs its K on
+  serial. If a roll goes the wrong way or the press doesn't cycle, fix the
+  `BRIGHT_KEY_*_BIT` defines in `config.h`. Levels above 90 are also
+  untested on one cable — see the runtime note above.
 - **The MPU6050 has not been run on real hardware yet.** The move to the
   I2C expansion connector (IO1/IO2) is reasoned from the vendor wiki and
   the board's own silkscreen, not yet confirmed by a sensor that

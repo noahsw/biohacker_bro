@@ -67,7 +67,7 @@ uint32_t rtcDay() {
 
 // Set the RTC from the build machine's clock. Only done on the first boot of
 // a freshly flashed build, so plugging the board in to flash it is also what
-// sets its date — there's no WiFi or buttons to do it any other way.
+// sets its date — there's no WiFi or clock-setting UI to do it any other way.
 void rtcSetFromBuildTime() {
   static const char months[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
   const char *d = __DATE__;         // "Oct  5 2026"

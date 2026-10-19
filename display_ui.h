@@ -55,5 +55,9 @@ float heartBeatLevel();
 // itself lives in hr_zones.h, which is hardware-free and unit-tested.
 uint16_t zoneColor(int bpm);
 
+// Until millis() reaches untilMs, drawMainScreen() shows "BRIGHT" and a row
+// of `count` pips, `level`+1 of them lit, in place of the step count.
+void showBrightnessIndicator(int level, int count, unsigned long untilMs);
+
 // Kept for the isolated test sketches, which have no BLE subsystem.
 void drawStepsScreen(unsigned long steps);
