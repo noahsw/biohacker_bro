@@ -62,6 +62,7 @@
 #include "ble_heart_rate.h"
 #include "steps.h"
 #include "display_ui.h"
+#include "brightness.h"
 
 // ============================================================================
 // SETUP / LOOP
@@ -75,9 +76,17 @@
 
 void setup() {
   Serial.begin(115200);
+  // Drop serial output rather than wait for it. Plugged into a computer with
+  // no monitor open, the USB port is "connected" but nobody is reading, and
+  // by default each print then blocks for up to ~2s (20 retries x 100ms)
+  // waiting for room. That froze the heart once per status line, every 2s.
+  // On battery there's no host and the core never waits, but a freeze that
+  // only happens on the bench still makes the bench lie.
+  Serial.setTxTimeoutMs(0);
 
   displaySetup();
   stepSetup();
+  brightnessSetup();  // after stepSetup(): the wheel is on its I2C bus
   bleSetup();
 }
 
@@ -101,6 +110,16 @@ void loop() {
   static unsigned long lastStatus = 0;
   static float beatMin = 1.0f, beatMax = 0.0f;
   static unsigned long frames = 0;
+  // Longest gap between two frames, this window and since boot. fps alone
+  // averages a stall away: one 300ms freeze every 2s still reads as ~45fps.
+  static unsigned long lastFrame = 0, maxGap = 0, worstGap = 0;
+  unsigned long nowFrame = millis();
+  if (lastFrame) {
+    unsigned long gap = nowFrame - lastFrame;
+    if (gap > maxGap) maxGap = gap;
+    if (gap > worstGap) worstGap = gap;
+  }
+  lastFrame = nowFrame;
   float lvl = heartBeatLevel();
   if (lvl < beatMin) beatMin = lvl;
   if (lvl > beatMax) beatMax = lvl;
@@ -108,13 +127,17 @@ void loop() {
 
   if (millis() - lastStatus > 2000) {
     unsigned long dt = millis() - lastStatus;
-    Serial.printf("hr=%-9s bpm=%3d  steps=%lu  mpu=%s  beat=%.2f..%.2f  fps=%lu\r\n",
+    Serial.printf("hr=%-9s bpm=%3d  steps=%lu  mpu=%s  beat=%.2f..%.2f  fps=%lu gap=%lu/%lums  wheel=0x%02X raw=0x%02X err=%lu bright=%d\r\n",
                   hrConnected ? "CONNECTED" : "scanning", currentBPM, stepCount,
                   stepSensorOk() ? "ok" : "ABSENT", beatMin, beatMax,
-                  dt ? frames * 1000UL / dt : 0);
+                  dt ? frames * 1000UL / dt : 0, maxGap, worstGap,
+                  brightnessWheelAddr(), brightnessWheelRaw(),
+                  brightnessWheelErrors(), brightnessLevel());
     lastStatus = millis();
-    beatMin = 1.0f; beatMax = 0.0f; frames = 0;
+    beatMin = 1.0f; beatMax = 0.0f; frames = 0; maxGap = 0;
   }
 
-  delay(15); // ~60fps, so the heart's brightness envelope stays smooth
+  // ~60fps, so the heart's brightness envelope stays smooth. Not a plain
+  // delay(): the wheel is read throughout the wait, see brightness.h.
+  brightnessWait(15);
 }

@@ -317,6 +317,49 @@ BpmStyle bpmStyle = BPM_BUILTIN_2;
 
 void setBpmStyle(BpmStyle style) { bpmStyle = style; }
 
+// ---- Brightness indicator ------------------------------------------------
+// "BRIGHT" in the steps label's 3x5 face, then one pip per level, lit up to
+// the current one: a volume-meter read, so "how bright, out of how many"
+// lands in one glance without a number to parse. Unlit pips stay faintly
+// visible, so the top level still reads as "full" rather than "a lot".
+// Bottom-aligned with the STEPS label, so the row doesn't jump when it swaps.
+unsigned long brightIndicatorUntil = 0;
+int brightIndicatorLevel = 0;
+int brightIndicatorCount = 1;
+const int BRIGHT_PIP_W = 5, BRIGHT_PIP_H = 6, BRIGHT_PIP_GAP = 2;
+const int BRIGHT_LABEL_GAP = 4;
+
+void showBrightnessIndicator(int level, int count, unsigned long untilMs) {
+  brightIndicatorLevel = level;
+  brightIndicatorCount = count;
+  brightIndicatorUntil = untilMs;
+}
+
+void drawBrightnessIndicator() {
+  display->setFont(&TomThumb);
+  int16_t lbx, lby;
+  uint16_t lbw, lbh;
+  display->getTextBounds("BRIGHT", 0, STEPS_LABEL_BASELINE_Y, &lbx, &lby, &lbw,
+                         &lbh);
+  int n = brightIndicatorCount;
+  int pipsW = n * BRIGHT_PIP_W + (n - 1) * BRIGHT_PIP_GAP;
+  int x = (PANEL_WIDTH - ((int)lbw + BRIGHT_LABEL_GAP + pipsW)) / 2;
+
+  uint16_t white = display->color565(220, 220, 220);
+  display->setTextColor(white);
+  display->setCursor(x - lbx, STEPS_LABEL_BASELINE_Y);
+  display->print("BRIGHT");
+
+  int pipX = x + (int)lbw + BRIGHT_LABEL_GAP;
+  int pipY = STEPS_LABEL_BASELINE_Y - BRIGHT_PIP_H;
+  uint16_t unlit = display->color565(40, 40, 40);
+  for (int i = 0; i < n; i++) {
+    display->fillRect(pipX + i * (BRIGHT_PIP_W + BRIGHT_PIP_GAP), pipY,
+                      BRIGHT_PIP_W, BRIGHT_PIP_H,
+                      i <= brightIndicatorLevel ? white : unlit);
+  }
+}
+
 const char *bpmStyleName(BpmStyle style) {
   switch (style) {
     case BPM_BUILTIN_2: return "builtin-x2";
@@ -378,7 +421,9 @@ bool displaySetup() {
 
   display = new MatrixPanel_I2S_DMA(mxconfig);
   bool ok = display->begin();
-  display->setBrightness8(90); // 0-255, tune for how bright you want it all night
+  // 0-255. The main sketch overrides this from the saved thumb-wheel level
+  // (brightness.cpp); this is what the test sketches run at.
+  display->setBrightness8(90);
   // The panel is 64px wide = 10 chars at size 1, 5 chars at size 2. Adafruit
   // GFX wraps overflowing text onto a second line by default, which on a 32px
   // panel means a stray letter alone on the row below. Truncate instead; the
@@ -575,6 +620,18 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
   // which should never out-shout its number. Dim for the same reason.
   //
   // Labelled while the BPM isn't — see the layout note above.
+  //
+  // For a couple of seconds after a turn of the thumb wheel the row shows the
+  // brightness level instead. The bottom row, not an overlay: the heart rate
+  // keeps reading normally the whole time, and the steps are the thing on
+  // the panel nobody misses for two seconds.
+  if ((long)(brightIndicatorUntil - millis()) > 0) {
+    drawBrightnessIndicator();
+    display->setFont(NULL);
+    display->flipDMABuffer();
+    return;
+  }
+
   unsigned long shownSteps = steps > STEPS_MAX ? STEPS_MAX : steps;
   int countW = stepCountWidth(shownSteps);
 
