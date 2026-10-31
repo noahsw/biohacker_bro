@@ -98,7 +98,8 @@ void restoreSteps() {
   prefs.begin("steps", false);
 
   const char *build = __DATE__ " " __TIME__;
-  if (prefs.getString("build", "") != build) {
+  bool freshFlash = prefs.getString("build", "") != build;
+  if (freshFlash) {
     rtcSetFromBuildTime();
     prefs.putString("build", build);
   }
@@ -115,6 +116,7 @@ void restoreSteps() {
   } else {
     stepCount = STEP_COUNT_START;
   }
+  if (freshFlash && STEP_COUNT_ON_FLASH > 0) stepCount = STEP_COUNT_ON_FLASH;
   Serial.printf("steps: day=%lu stored=%lu restored=%lu\r\n",
                 (unsigned long)currentDay, (unsigned long)storedDay, stepCount);
   saveSteps();

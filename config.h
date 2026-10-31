@@ -99,6 +99,12 @@
 // you ever want the raw count.
 #define STEP_COUNT_START 5000
 
+// --- 5a. Step count to set when flashing ---
+// Nonzero => the first boot of a freshly flashed build sets the count to this,
+// whatever was saved. The way to correct a wrong count: change this, flash,
+// then set it back to 0 (later reboots of the same build won't reapply it).
+#define STEP_COUNT_ON_FLASH 0
+
 // --- 5b. When "today" ends ---
 // The count is saved to flash and survives reboots and battery swaps, then
 // resets to STEP_COUNT_START when the date changes (read from the onboard
