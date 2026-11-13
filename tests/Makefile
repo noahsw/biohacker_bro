@@ -18,8 +18,10 @@ HR_SOURCES    := test_hr_zones.cpp $(ROOT)/hr_zones.cpp
 STEPS_SOURCES := test_steps_layout.cpp   # steps_layout.h is header-only
 HRLAYOUT_SOURCES := test_hr_layout.cpp   # hr_layout.h is header-only too
 DETECTOR_SOURCES := test_step_detector.cpp   # step_detector.h is header-only
+TOTEM_SOURCES := test_totem_layout.cpp $(ROOT)/hr_zones.cpp   # totem/face_layout.h, led_map.h header-only
 BINARIES      := $(BUILD)/test_hr_zones $(BUILD)/test_steps_layout \
-                 $(BUILD)/test_hr_layout $(BUILD)/test_step_detector
+                 $(BUILD)/test_hr_layout $(BUILD)/test_step_detector \
+                 $(BUILD)/test_totem_layout
 
 # The binary is rebuilt unconditionally rather than by timestamp. It's a
 # single-file compile that takes well under a second, and make's 1-second
@@ -37,6 +39,12 @@ compile: | $(ROOT)/secrets.h $(BUILD)
 	@$(CXX) $(CXXFLAGS) -o $(BUILD)/test_steps_layout $(STEPS_SOURCES)
 	@$(CXX) $(CXXFLAGS) -o $(BUILD)/test_hr_layout $(HRLAYOUT_SOURCES)
 	@$(CXX) $(CXXFLAGS) -o $(BUILD)/test_step_detector $(DETECTOR_SOURCES)
+	@$(CXX) $(CXXFLAGS) -o $(BUILD)/test_totem_layout $(TOTEM_SOURCES)
+	@for s in 0 1; do for fx in 0 1; do for fy in 0 1; do for t in 0 1; do \
+	  $(CXX) $(CXXFLAGS) -DPANEL_SERPENTINE=$$s -DPANEL_FLIP_X=$$fx -DPANEL_FLIP_Y=$$fy -DPANEL_TRANSPOSE=$$t \
+	    -o $(BUILD)/test_totem_map_$$s$$fx$$fy$$t $(TOTEM_SOURCES) && $(BUILD)/test_totem_map_$$s$$fx$$fy$$t > /dev/null \
+	    || { echo "totem LED map broken for SERPENTINE=$$s FLIP_X=$$fx FLIP_Y=$$fy TRANSPOSE=$$t"; exit 1; }; \
+	  done; done; done; done
 
 $(BUILD):
 	@mkdir -p $(BUILD)
