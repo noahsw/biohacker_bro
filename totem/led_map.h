@@ -27,3 +27,13 @@ inline int ledIndex(int face, int x, int y) {
 #endif
   return face * LEDS_PER_FACE + py * FACE_W + px;
 }
+
+// Ring: column 0..47 left to right seen from outside, row 0..15 top to bottom.
+// Panels are 16 columns each; RING_REVERSE flips which way the chain runs.
+inline int ringLedIndex(int col, int row) {
+  int panel = col / FACE_W, x = col % FACE_W;
+#if RING_REVERSE
+  panel = FACE_COUNT - 1 - panel;
+#endif
+  return ledIndex(panel, x, row);
+}

@@ -40,11 +40,11 @@ compile: | $(ROOT)/secrets.h $(BUILD)
 	@$(CXX) $(CXXFLAGS) -o $(BUILD)/test_hr_layout $(HRLAYOUT_SOURCES)
 	@$(CXX) $(CXXFLAGS) -o $(BUILD)/test_step_detector $(DETECTOR_SOURCES)
 	@$(CXX) $(CXXFLAGS) -o $(BUILD)/test_totem_layout $(TOTEM_SOURCES)
-	@for s in 0 1; do for fx in 0 1; do for fy in 0 1; do for t in 0 1; do \
-	  $(CXX) $(CXXFLAGS) -DPANEL_SERPENTINE=$$s -DPANEL_FLIP_X=$$fx -DPANEL_FLIP_Y=$$fy -DPANEL_TRANSPOSE=$$t \
-	    -o $(BUILD)/test_totem_map_$$s$$fx$$fy$$t $(TOTEM_SOURCES) && $(BUILD)/test_totem_map_$$s$$fx$$fy$$t > /dev/null \
-	    || { echo "totem LED map broken for SERPENTINE=$$s FLIP_X=$$fx FLIP_Y=$$fy TRANSPOSE=$$t"; exit 1; }; \
-	  done; done; done; done
+	@for r in 0 1; do for rv in 0 1; do for s in 0 1; do for fx in 0 1; do for fy in 0 1; do for t in 0 1; do \
+	  $(CXX) $(CXXFLAGS) -DTOTEM_RING=$$r -DRING_REVERSE=$$rv -DPANEL_SERPENTINE=$$s -DPANEL_FLIP_X=$$fx -DPANEL_FLIP_Y=$$fy -DPANEL_TRANSPOSE=$$t \
+	    -o $(BUILD)/test_totem_map $(TOTEM_SOURCES) && $(BUILD)/test_totem_map > /dev/null \
+	    || { echo "totem LED map broken for RING=$$r REVERSE=$$rv SERPENTINE=$$s FLIP_X=$$fx FLIP_Y=$$fy TRANSPOSE=$$t"; exit 1; }; \
+	  done; done; done; done; done; done
 
 $(BUILD):
 	@mkdir -p $(BUILD)

@@ -3,8 +3,13 @@
 #include <stdint.h>
 
 // ============================================================================
-// TOTEM CONFIG — the festival lantern: four 16x16 WS2812B grids, one per side
+// TOTEM CONFIG — the festival lantern
 // ============================================================================
+//
+// Two shapes share this sketch. The ROUND totem (the default) wraps three
+// 16x16 WS2812B panels into a 48x16 ring with an EKG trace and a ticker of
+// your crew's heart rates. The CUBE puts four panels on four sides, each
+// showing a heart and your BPM.
 //
 // Everything else (Whoop MAC, zone thresholds, brightness levels, wheel keys)
 // still comes from the shared config.h, so a zone retune applies to the chest
@@ -22,9 +27,18 @@
 #define LED_PIN 5
 
 // --- 2. Geometry ---
+// 1 = round totem (3 panels in a ring), 0 = cube (4 panels, one per side).
+#ifndef TOTEM_RING
+#define TOTEM_RING 1
+#endif
 #define FACE_W 16
 #define FACE_H 16
+#if TOTEM_RING
+#define FACE_COUNT 3
+#else
 #define FACE_COUNT 4
+#endif
+#define RING_COLS (FACE_W * FACE_COUNT)
 #define LEDS_PER_FACE (FACE_W * FACE_H)
 #define NUM_LEDS (LEDS_PER_FACE * FACE_COUNT)
 
@@ -33,9 +47,13 @@
 // Which corner the data enters at depends on the brand and on how the panel
 // sits in its frame, so these are a starting guess. Flash with the test on,
 // then fix the flags until every face shows its number upright and the
-// marker pixels sit where the test says. All four faces are mounted the same
-// way round in the cube, so one set of flags covers them. (#ifndef only so the
-// host tests can build every combination.)
+// marker pixels sit where the test says. All panels are mounted the same
+// way round, so one set of flags covers them. (#ifndef only so the host tests
+// can build every combination.)
+//
+// Ring only: the test also runs a white dot along row 15 from column 0 to 47.
+// If it jumps backwards at a seam between panels, the chain runs round the
+// ring the other way: set RING_REVERSE to 1.
 #ifndef PANEL_SERPENTINE
 #define PANEL_SERPENTINE 1   // 1: alternate rows reverse direction
 #endif
@@ -49,6 +67,10 @@
 #define PANEL_TRANSPOSE  0   // 1: the panel's "rows" are columns (wired vertically)
 #endif
 
+#ifndef RING_REVERSE
+#define RING_REVERSE     0   // 1: panel 0 is on the right of panel 1, not the left
+#endif
+
 // 1 = draw the orientation test instead of the heart rate. See totem.ino.
 #define TOTEM_ORIENTATION_TEST 0
 
@@ -57,13 +79,15 @@
 // USB-A, not the second USB-C port: a USB-C port only switches on for a device
 // that identifies itself, and a bare-wire pigtail doesn't.
 //
-// FastLED scales every frame down to stay under this cap. At full scale the
-// four faces would draw ~7.5 A, and ~2.6 A even at the wheel's middle level,
-// so in practice this cap IS the brightness. 1800 mA keeps the whole totem
-// near 9.5 W, which the Anker 537 (24,000 mAh) runs for about 6.5-7 hours
-// even with the wheel turned all the way up. At the wheel's second level the
-// draw is ~1.6 A and the bank lasts ~8 hours. Raise it for a brighter totem
-// only if you can live with a shorter night.
+// FastLED scales every frame down to stay under this cap. 1800 mA keeps the
+// whole totem near 9.5 W, which the Anker 537 (24,000 mAh) runs for about
+// 6.5-7 hours even if every frame hits the cap.
+//
+// By FastLED's own estimate (which counts ~1 mA for every unlit LED, so it
+// reads high) the ring averages ~2.1 A at the wheel's middle level, ~1.5 A
+// at level 1 and ~1.3 A at the lowest. So from the middle level up the cap is
+// what sets the brightness and the night is ~6.5-7 h; at level 1 it's ~8 h.
+// Raise the cap for a brighter totem only if you can live with a shorter night.
 #ifndef LED_MAX_MA
 #define LED_MAX_MA 1800
 #endif
@@ -73,3 +97,52 @@
 // the heart across the dark pixels. 0 turns it off.
 #define RIPPLE_ENABLED 1
 #define RIPPLE_MS      450
+
+// --- 5. Round totem: EKG and ticker ---
+#define EKG_PX_PER_S     30    // write head speed: once round the 48 columns in 1.6 s
+#define EKG_FADE_MS      900   // how fast the trace behind the head dims
+#define TICKER_PX_PER_S  8     // ticker drift; a 3-digit rate passes a viewer in ~2 s
+
+// --- 6. Crew: friends' heart rates on the ring ---
+// Up to four friends' Whoops (HR Broadcast on) or any standard Bluetooth heart
+// rate strap. Each friend shows as their initial and BPM in the ticker while
+// connected, and drops out when they walk off. Get a strap's MAC with the
+// find_whoop_mac sketch, the same way you got yours.
+//
+// Put the MACs in secrets.h (#define CREW_MAC_1 "AA:BB:...") or here. "" = empty.
+//
+// The BLE library allows 3 connections by default: you + 2 friends. For 3 or
+// 4 friends, open NimBLE-Arduino's src/nimconfig.h and change the commented
+//   // #define MYNEWT_VAL_BLE_MAX_CONNECTIONS 3
+// to
+//   #define MYNEWT_VAL_BLE_MAX_CONNECTIONS 5
+// (the ESP32 radio itself allows 9). Without that, friends past the second
+// just never appear, and the serial log says why.
+#ifndef CREW_ENABLED
+#define CREW_ENABLED 1
+#endif
+#ifndef CREW_MAC_1
+#define CREW_MAC_1 ""
+#endif
+#ifndef CREW_MAC_2
+#define CREW_MAC_2 ""
+#endif
+#ifndef CREW_MAC_3
+#define CREW_MAC_3 ""
+#endif
+#ifndef CREW_MAC_4
+#define CREW_MAC_4 ""
+#endif
+#ifndef CREW_INITIAL_1
+#define CREW_INITIAL_1 'A'
+#endif
+#ifndef CREW_INITIAL_2
+#define CREW_INITIAL_2 'B'
+#endif
+#ifndef CREW_INITIAL_3
+#define CREW_INITIAL_3 'C'
+#endif
+#ifndef CREW_INITIAL_4
+#define CREW_INITIAL_4 'D'
+#endif
+#define CREW_MAX 4

@@ -3,21 +3,24 @@
   BIOHACKER BRO — FESTIVAL TOTEM
   ============================================================================
   The chest display's brain on a pole: the same ESP32-S3 board, Whoop link,
-  zone math and thumb-wheel brightness, driving a lantern of four 16x16
-  WS2812B grids instead of the 64x32 HUB75 panel.
+  zone math and thumb-wheel brightness, driving WS2812B grids instead of the
+  64x32 HUB75 panel. Two shapes (TOTEM_RING in totem_config.h):
 
-  Each face shows the same thing at once (no rotation, for the same reason as
-  the costume: a passer-by gets one glance): a heart pulsing with the real
-  heartbeat and the BPM in the zone's colour. When the Whoop is out of range
-  (it reaches roughly 10 m, less through a crowd) the faces show a dim
-  breathing heart outline and "--" until it reconnects on its own.
+  ROUND (default): three 16x16 panels wrapped into a 48x16 ring. Top: an EKG
+  trace that sweeps round the ring and spikes on every real heartbeat, in
+  your zone colour. Bottom: a ticker drifting round it, "<3 72  DON'T DIE
+  V 88  DON'T DIE ...", your BPM plus each connected friend's. When your
+  Whoop is out of range the trace flatlines in grey and your rate reads "--".
+
+  CUBE: four panels, one per side, each with a heart pulsing on your beats
+  and your BPM in the zone's colour.
 
   Hardware
     - WatangTech / Seengreat ESP32-S3 HUB75 board (USB-C input from the bank's USB-C1 port)
-    - 4x WS2812B 16x16 flexible panels, chained, data on HUB75 header pin 1
-      (GPIO 5); 5 V from the bank's USB-A port via a USB-A pigtail, 18 AWG
-      wire up the pole and lever connectors
-    - Whoop strap in HR Broadcast mode
+    - 3 (ring) or 4 (cube) WS2812B 16x16 flexible panels, chained, data on
+      HUB75 header pin 1 (GPIO 5); 5 V from the bank's USB-A port via a USB-A
+      pigtail, 18 AWG wire up the pole and lever connectors
+    - Whoop strap in HR Broadcast mode, and your friends' if they're in the crew
 
   Libraries: FastLED (3.9 or later, for the ESP32-S3 RMT driver), NimBLE-Arduino.
   The HUB75 DMA library is not used here.
@@ -35,7 +38,8 @@
 #include "face_layout.h"
 #include "led_map.h"
 #include "hr_zones.h"
-#include "ble_heart_rate.h"
+#include "crew_ble.h"
+#include "ring_layout.h"
 #include "brightness.h"
 #include "display_ui.h"
 
@@ -185,6 +189,126 @@ static void drawFace(int bpm, bool connected) {
       if (face::textAt(glyphs, n, x, y)) faceBuf[y][x] = textColor;
 }
 
+// ---------------------------------------------------------------------------
+// Round totem: EKG trace on rows 0..8, ticker on rows 10..15
+// ---------------------------------------------------------------------------
+static CRGB ringBuf[ring::ROWS][ring::COLS];
+
+// One step of the trace per column. Each column remembers the vertical run it
+// drew (from the previous step's height to this one's, so the spike is a
+// solid line) and when, so it can fade.
+static int8_t ekgLo[ring::COLS], ekgHi[ring::COLS];
+static unsigned long ekgAt[ring::COLS];
+static bool ekgWritten[ring::COLS];
+static int ekgHead = 0, ekgPrevY = 0;
+static unsigned long ekgLastStep = 0;
+static unsigned long ekgBeatSeen = 0;   // beatCount at the last spike we started
+static long ekgSpikeStep = -1000;       // step index since the spike began
+
+static void ekgStep(bool connected) {
+  int y = 0;
+  if (connected) {
+    if (beatCount != ekgBeatSeen) { ekgBeatSeen = beatCount; ekgSpikeStep = 0; }
+    y = ring::waveAt((int)ekgSpikeStep);
+    ekgSpikeStep++;
+  }
+  ekgHead = (ekgHead + 1) % ring::COLS;
+  ekgLo[ekgHead] = min(ekgPrevY, y);
+  ekgHi[ekgHead] = max(ekgPrevY, y);
+  ekgAt[ekgHead] = millis();
+  ekgWritten[ekgHead] = true;
+  ekgPrevY = y;
+  for (int g = 1; g <= ring::GAP_AHEAD; g++) ekgWritten[(ekgHead + g) % ring::COLS] = false;
+}
+
+static void drawEkg(int bpm, bool connected) {
+  const unsigned long stepMs = 1000UL / EKG_PX_PER_S;
+  unsigned long now = millis();
+  if (now - ekgLastStep > 500) ekgLastStep = now - stepMs;   // after a stall, don't race to catch up
+  while (now - ekgLastStep >= stepMs) { ekgLastStep += stepMs; ekgStep(connected && bpm > 0); }
+
+  CRGB zc = connected && bpm > 0 ? zoneRgb(bpm) : CRGB(90, 90, 90);   // grey flatline while searching
+  for (int c = 0; c < ring::COLS; c++) {
+    if (!ekgWritten[c]) continue;
+    float age = (float)(now - ekgAt[c]);
+    CRGB col = zc;
+    if (c == ekgHead) {
+      col = zc; col.nscale8_video(150); col += CRGB(100, 100, 100);   // the bright write head
+    } else {
+      col.nscale8_video((uint8_t)(255 * (0.30f + 0.70f * expf(-age / EKG_FADE_MS))));
+    }
+    for (int yv = ekgLo[c]; yv <= ekgHi[c]; yv++) ringBuf[ring::waveRow(yv)][c] = col;
+  }
+}
+
+static CRGB crewRgb(int i) {   // a colour per friend, away from the zone colours
+  static const CRGB C[CREW_MAX] = {CRGB(255, 0, 170), CRGB(40, 255, 60), CRGB(150, 60, 255), CRGB(255, 110, 0)};
+  return C[i % CREW_MAX];
+}
+
+static ring::Col tickerCols[ring::MAX_COLS];
+
+static void drawTicker(int bpm, bool connected) {
+  ring::Person people[1 + CREW_MAX];
+  int n = 0;
+  people[n++] = ring::Person{'<', bpm, connected && bpm > 0};
+  for (int i = 0; i < crewCount; i++)
+    people[n++] = ring::Person{crew[i].initial, crew[i].bpm, crew[i].connected};
+  int len = ring::buildTicker(people, n, tickerCols, ring::MAX_COLS);
+  if (len <= 0) return;
+
+  unsigned long now = millis();
+  int off = (int)((now * TICKER_PX_PER_S / 1000UL) % (unsigned long)len);
+  float beat = 0.25f + 0.75f * beatIntensity();
+  for (int c = 0; c < ring::COLS - ring::SEAM_COLS; c++) {
+    const ring::Col &tc = tickerCols[(c + off) % len];
+    if (!tc.bits) continue;
+    CRGB col;
+    switch (tc.kind) {
+      case ring::BADGE:
+        if (tc.person == 0) {
+          col = connected ? CRGB(255 * beat, 20 * beat, 20 * beat) : CRGB(70, 70, 70);   // your heart beats
+        } else {
+          col = crewRgb(tc.person - 1);
+        }
+        break;
+      case ring::RATE:
+        col = tc.person == 0 && !(connected && bpm > 0) ? CRGB(70, 70, 70)
+              : zoneRgb(tc.person == 0 ? bpm : crew[tc.person - 1].bpm);
+        break;
+      default:   // DON'T DIE: a slow rainbow rolling through the letters
+        col = CHSV((uint8_t)(now / 20 + (c + off) * 6), 255, 255);
+    }
+    for (int r = 0; r < ring::TEXT_H; r++)
+      if (tc.bits & (1 << r)) ringBuf[ring::TEXT_Y + r][c] = col;
+  }
+}
+
+static void drawRing(int bpm, bool connected) {
+  for (int y = 0; y < ring::ROWS; y++)
+    for (int x = 0; x < ring::COLS; x++) ringBuf[y][x] = CRGB::Black;
+  drawEkg(bpm, connected);
+
+  // Brightness pips replace the ticker for two seconds after a wheel change,
+  // three times round so every side sees them.
+  if (millis() < indicatorUntil && indicatorCount > 0) {
+    for (int k = 0; k < 3; k++) {
+      int x0 = k * 16 + (16 - (indicatorCount * 3 - 1)) / 2;
+      for (int i = 0; i < indicatorCount; i++)
+        for (int dx = 0; dx < 2; dx++)
+          for (int y = 12; y < 14; y++)
+            ringBuf[y][x0 + i * 3 + dx] = i <= indicatorLevel ? CRGB(220, 220, 220) : CRGB(30, 30, 30);
+    }
+    return;
+  }
+  drawTicker(bpm, connected);
+}
+
+static void blitRing() {
+  for (int y = 0; y < ring::ROWS; y++)
+    for (int x = 0; x < ring::COLS; x++) leds[ringLedIndex(x, y)] = ringBuf[y][x];
+}
+
 static void blitAllFaces() {
   for (int f = 0; f < FACE_COUNT; f++)
     for (int y = 0; y < face::H; y++)
@@ -208,6 +332,12 @@ static void drawOrientationTest() {
     for (int y = 0; y < face::H; y++)
       for (int x = 0; x < face::W; x++) leds[ledIndex(f, x, y)] = faceBuf[y][x];
   }
+#if TOTEM_RING
+  // A white dot walking along the bottom row, column 0 to 47, once a second
+  // per panel. If it jumps backwards at a panel seam, set RING_REVERSE.
+  int dot = (int)((millis() / 60) % RING_COLS);
+  leds[ringLedIndex(dot, face::H - 1)] = CRGB::White;
+#endif
 }
 
 void setup() {
@@ -230,15 +360,21 @@ void loop() {
 #if TOTEM_ORIENTATION_TEST
   drawOrientationTest();
 #else
+#if TOTEM_RING
+  drawRing(currentBPM, hrConnected);
+  blitRing();
+#else
   drawFace(currentBPM, hrConnected);
   blitAllFaces();
 #endif
-  FastLED.show();   // ~31 ms for 1024 LEDs, so ~30 fps; the pulse stays smooth
+#endif
+  FastLED.show();   // ~23 ms for 768 LEDs (31 ms for the cube's 1024): 30+ fps
 
   static unsigned long lastStatus = 0;
   if (millis() - lastStatus > 2000) {
-    Serial.printf("hr=%-9s bpm=%3d  bright=%d  est_mA=%lu\r\n",
-                  hrConnected ? "CONNECTED" : "scanning", currentBPM, brightnessLevel(),
+    Serial.printf("hr=%-9s bpm=%3d  crew=", hrConnected ? "CONNECTED" : "scanning", currentBPM);
+    for (int i = 0; i < crewCount; i++) Serial.printf("%c:%d ", crew[i].initial, crew[i].connected ? crew[i].bpm : 0);
+    Serial.printf(" bright=%d  est_mA=%lu\r\n", brightnessLevel(),
                   (unsigned long)calculate_unscaled_power_mW(leds, NUM_LEDS) / 5);
     lastStatus = millis();
   }
