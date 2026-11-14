@@ -4,16 +4,17 @@
   ============================================================================
   The chest display's brain on a pole: the same ESP32-S3 board, Whoop link,
   zone math and thumb-wheel brightness, driving WS2812B grids instead of the
-  64x32 HUB75 panel. Two shapes (TOTEM_RING in totem_config.h):
+  64x32 HUB75 panel. Two layouts (TOTEM_RING in totem_config.h):
 
-  ROUND (default): three 16x16 panels wrapped into a 48x16 ring. Top: an EKG
+  FACES (default): four 16x16 panels wrapped round the head, all four showing
+  the same thing at once: the chest display's zone bar on top, a heart pulsing
+  on your beats, and your BPM in the zone's colour.
+
+  RING (TOTEM_RING 1, kept for later): three 16x16 panels as one 48x16 ring. Top: an EKG
   trace that sweeps round the ring and spikes on every real heartbeat, in
   your zone colour. Bottom: a ticker drifting round it, "<3 72  DON'T DIE
   V 88  DON'T DIE ...", your BPM plus each connected friend's. When your
   Whoop is out of range the trace flatlines in grey and your rate reads "--".
-
-  CUBE: four panels, one per side, each with a heart pulsing on your beats
-  and your BPM in the zone's colour.
 
   Hardware
     - WatangTech / Seengreat ESP32-S3 HUB75 board (USB-C input from the bank's USB-C1 port)

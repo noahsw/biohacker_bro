@@ -6,10 +6,11 @@
 // TOTEM CONFIG — the festival lantern
 // ============================================================================
 //
-// Two shapes share this sketch. The ROUND totem (the default) wraps three
-// 16x16 WS2812B panels into a 48x16 ring with an EKG trace and a ticker of
-// your crew's heart rates. The CUBE puts four panels on four sides, each
-// showing a heart and your BPM.
+// Two layouts share this sketch. FACES (the default): four 16x16 WS2812B
+// panels wrapped round the head, every panel showing the same frame at the
+// same time: the zone bar, a heart pulsing on your beats, and your BPM.
+// RING (TOTEM_RING 1, kept for later): three panels as one 48x16 ring with an
+// EKG trace and a ticker of your crew's heart rates.
 //
 // Everything else (Whoop MAC, zone thresholds, brightness levels, wheel keys)
 // still comes from the shared config.h, so a zone retune applies to the chest
@@ -27,9 +28,9 @@
 #define LED_PIN 5
 
 // --- 2. Geometry ---
-// 1 = round totem (3 panels in a ring), 0 = cube (4 panels, one per side).
+// 0 = four panels, all showing the same face (the build). 1 = 3-panel EKG ring.
 #ifndef TOTEM_RING
-#define TOTEM_RING 1
+#define TOTEM_RING 0
 #endif
 #define FACE_W 16
 #define FACE_H 16
