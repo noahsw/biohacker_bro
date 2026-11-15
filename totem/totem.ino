@@ -9,8 +9,8 @@
   FACES (default): four 16x16 panels wrapped round the head, all four showing
   the same thing at once: the chest display's zone bar on top, a heart pulsing
   on your beats, and your BPM in the zone's colour. When a friend's strap is
-  connected (CREW_FACES), two opposite faces switch to them, with a cyan heart
-  beating on their beats.
+  connected (CREW_FACES), two opposite faces switch to them: cyan heart beating
+  on their beats, cyan number, same zone bar.
 
   RING (TOTEM_RING 1, kept for later): three 16x16 panels as one 48x16 ring. Top: an EKG
   trace that sweeps round the ring and spikes on every real heartbeat, in
@@ -139,7 +139,10 @@ static CRGB zoneRgb(int bpm) {
 
 // heartRgb: the heart's full-beat colour (red for you, cyan for your friend).
 // lastBeat: when that heart last beat, for the pulse and the ripple.
-static void drawFace(int bpm, bool connected, CRGB heartRgb, unsigned long lastBeat) {
+// friendFace: the number and ripple take the heart's colour instead of the
+// zone's, so a friend in the blue zone doesn't read as blue-and-cyan.
+static void drawFace(int bpm, bool connected, CRGB heartRgb, unsigned long lastBeat,
+                     bool friendFace = false) {
   for (int y = 0; y < face::H; y++)
     for (int x = 0; x < face::W; x++) faceBuf[y][x] = CRGB::Black;
 
@@ -157,14 +160,14 @@ static void drawFace(int bpm, bool connected, CRGB heartRgb, unsigned long lastB
       for (int x = 0; x < face::W; x++)
         if (face::heartAt(x, y)) faceBuf[y][x] = heart;
     n = face::bpmGlyphs(bpm, glyphs);
-    textColor = zoneRgb(bpm);
+    textColor = friendFace ? heartRgb : zoneRgb(bpm);
 
 #if RIPPLE_ENABLED
     unsigned long age = millis() - lastBeat;
     if (age < RIPPLE_MS) {
       float r = 5.0f + 9.0f * age / RIPPLE_MS;             // ring radius in pixels
       float fade = 1.0f - (float)age / RIPPLE_MS;
-      CRGB c = zoneRgb(bpm);
+      CRGB c = friendFace ? heartRgb : zoneRgb(bpm);
       c.nscale8_video((uint8_t)(70 * fade));
       for (int y = 0; y < face::H; y++)
         for (int x = 0; x < face::W; x++) {
@@ -345,7 +348,7 @@ static void drawAndBlitFaces() {
   if (fr < 0) { friendLastBeat = millis(); blitAllFaces(); return; }
   for (int f = 0; f < FACE_COUNT; f += 2) blitFace(f);
   advanceBeat(crew[fr].bpm, friendLastBeat, friendBeatCount);
-  drawFace(crew[fr].bpm, true, HEART_RGB_FRIEND, friendLastBeat);
+  drawFace(crew[fr].bpm, true, HEART_RGB_FRIEND, friendLastBeat, true);
   for (int f = 1; f < FACE_COUNT; f += 2) blitFace(f);
 }
 
