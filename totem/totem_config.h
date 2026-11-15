@@ -147,3 +147,13 @@
 #define CREW_INITIAL_4 'D'
 #endif
 #define CREW_MAX 4
+
+// --- Friend on the faces (FACES layout) ---
+// 1: when a friend's strap is connected, two opposite faces show them with a
+// cyan heart, the other two show you with a red one. 0: all four show you.
+// Only the first connected friend is shown; the ring layout shows them all.
+#ifndef CREW_FACES
+#define CREW_FACES 1
+#endif
+#define HEART_RGB_YOU    CRGB(255, 20, 20)
+#define HEART_RGB_FRIEND CRGB(0, 200, 255)
