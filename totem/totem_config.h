@@ -62,7 +62,7 @@
 #define PANEL_FLIP_X     0   // 1: mirror left-right
 #endif
 #ifndef PANEL_FLIP_Y
-#define PANEL_FLIP_Y     0   // 1: mirror top-bottom (data enters at the bottom)
+#define PANEL_FLIP_Y     1   // 1: mirror top-bottom (data enters at the bottom)
 #endif
 #ifndef PANEL_TRANSPOSE
 #define PANEL_TRANSPOSE  0   // 1: the panel's "rows" are columns (wired vertically)
