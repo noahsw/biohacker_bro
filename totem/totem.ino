@@ -125,11 +125,20 @@ static void drawZoneBar(int bpm, bool connected, bool peak) {
   }
   if (!peak) lastFill = fill;
   bool blinkOff = !peak && (millis() / BAR_BLINK_MS) % 2;
+  // Brightness this frame goes out at: limitBrightness() has already run for
+  // the real frame. The peak frame sees last frame's, which is close enough.
+  uint8_t floorV = face::visibleFloor(FastLED.getBrightness());
   for (int z = 0; z < ZONE_COUNT; z++) {
     CRGB c = zonePaletteRgb(z);
     for (int x = zoneSliceX(z, face::W); x < zoneSliceX(z + 1, face::W); x++) {
       CRGB p = c;
       if (x >= fill || (blinkOff && x == fill - 1)) p.nscale8_video(56);   // ~22%: the unlit legend
+      // Never let a bar pixel round to black at low brightness: lift its
+      // brightest channel to the floor, keeping the colour's proportions.
+      uint8_t m = max(p.r, max(p.g, p.b));
+      if (m > 0 && m < floorV) {
+        p.r = (uint16_t)p.r * floorV / m; p.g = (uint16_t)p.g * floorV / m; p.b = (uint16_t)p.b * floorV / m;
+      }
       faceBuf[face::BAR_Y][x] = p;
     }
   }

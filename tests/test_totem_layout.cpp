@@ -153,6 +153,15 @@ int main() {
     CHECK(moves == 0, "bar end pixel moved %d times with bpm 62/63", moves);
   }
 
+  // Visible floor: at every global brightness, the floor survives FastLED's
+  // v*(b+1)>>8 and one less doesn't (so it isn't brighter than it needs to be).
+  for (int b = 1; b <= 255; b++) {
+    int f = face::visibleFloor((uint8_t)b);
+    CHECK(((f * (b + 1)) >> 8) >= 1, "floor %d goes dark at brightness %d", f, b);
+    CHECK(f == 1 || (((f - 1) * (b + 1)) >> 8) == 0, "floor %d higher than needed at brightness %d", f, b);
+  }
+  CHECK(((10 * (14 + 1)) >> 8) == 0, "the blank-pixel case no longer reproduces: recheck the floor comment");
+
   std::printf("totem layout: %s\n", failures ? "FAILED" : "ok");
   return failures ? 1 : 0;
 }

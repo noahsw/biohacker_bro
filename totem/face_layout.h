@@ -99,6 +99,13 @@ inline int barFill(float exact, int prev) {
   return d < BAR_HOLD_PX ? prev : r;
 }
 
+// The smallest channel value that's still lit after FastLED's global
+// brightness `b`. With dithering off, FastLED scales each channel as
+// v * (b + 1) >> 8, so anything under 256 / (b + 1) rounds to 0. That made
+// the bar's dim legend go blank: zone 0's unlit grey is ~10, and at the
+// capped brightness of ~14 that comes out as 0.
+inline uint8_t visibleFloor(uint8_t b) { return (uint8_t)((256 + b) / (b + 1)); }   // ceil(256 / (b+1))
+
 // Width of a run of glyphs, and the left column that centres it on 16.
 // Odd widths (2 digits = 11, 3 = 15) round right, so "72" sits under the
 // heart's centre line rather than a pixel left of it.
