@@ -93,6 +93,16 @@
 #define LED_MAX_MA 1800
 #endif
 
+// Cap used instead while a computer is on the board's USB-C port, so the
+// panels can run off the Mac at the desk with the battery left out. The
+// firmware tells the two apart because a computer talks USB (it sends a
+// start-of-frame packet every millisecond) and a power bank never does. With
+// both the Mac and the battery plugged in it uses this lower cap: the safe
+// side. Unplug the Mac and the full LED_MAX_MA is back within ~2 s.
+#ifndef LED_MAX_MA_USB_HOST
+#define LED_MAX_MA_USB_HOST 500
+#endif
+
 // --- 4. Look ---
 // Beat ripple: on each beat a faint ring in the zone colour spreads out from
 // the heart across the dark pixels. Off: on the real panels it was too much
