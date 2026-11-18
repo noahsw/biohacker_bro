@@ -95,9 +95,14 @@
 
 // --- 4. Look ---
 // Beat ripple: on each beat a faint ring in the zone colour spreads out from
-// the heart across the dark pixels. 0 turns it off.
-#define RIPPLE_ENABLED 1
+// the heart across the dark pixels. Off: on the real panels it was too much
+// on top of the pulsing heart. 1 brings it back.
+#define RIPPLE_ENABLED 0
 #define RIPPLE_MS      450
+
+// The bar's current-position pixel blinks: this long on, this long at the
+// unlit level, so you can find where you are on the bar at a glance.
+#define BAR_BLINK_MS   500
 
 // --- 5. Round totem: EKG and ticker ---
 #define EKG_PX_PER_S     30    // write head speed: once round the 48 columns in 1.6 s
