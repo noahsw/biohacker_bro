@@ -8,7 +8,9 @@
 
   FACES (default): four 16x16 panels wrapped round the head, all four showing
   the same thing at once: the chest display's zone bar on top, a heart pulsing
-  on your beats, and your BPM in the zone's colour.
+  on your beats, and your BPM in the zone's colour. When a friend's strap is
+  connected (CREW_FACES), two opposite faces switch to them: cyan heart beating
+  on their beats, cyan number, same zone bar.
 
   RING (TOTEM_RING 1, kept for later): three 16x16 panels as one 48x16 ring. Top: an EKG
   trace that sweeps round the ring and spikes on every real heartbeat, in
@@ -83,21 +85,26 @@ static unsigned long beatCount = 0;
 
 static float expDecay(float t, float tau) { return t < 0 ? 0.0f : expf(-t / tau); }
 
-static float beatIntensity() {
-  float t = (float)(millis() - lastBeatTime);
+static float beatIntensityAt(unsigned long lastBeat) {
+  float t = (float)(millis() - lastBeat);
   float i = expDecay(t, 150.0f) + 0.45f * expDecay(t - 280.0f, 120.0f);
   return i > 1.0f ? 1.0f : i;
 }
+static float beatIntensity() { return beatIntensityAt(lastBeatTime); }
 
-static void updateHeartbeatPhase(int bpm) {
+static void advanceBeat(int bpm, unsigned long &lastBeat, unsigned long &count) {
   if (bpm <= 0) return;
   unsigned long interval = 60000UL / bpm, now = millis();
-  if (now - lastBeatTime >= interval) {
-    lastBeatTime += interval;
-    if (now - lastBeatTime > interval) lastBeatTime = now;
-    beatCount++;
+  if (now - lastBeat >= interval) {
+    lastBeat += interval;
+    if (now - lastBeat > interval) lastBeat = now;
+    count++;
   }
 }
+static void updateHeartbeatPhase(int bpm) { advanceBeat(bpm, lastBeatTime, beatCount); }
+
+// Your friend's heart keeps its own time, so the two hearts beat out of step.
+static unsigned long friendLastBeat = 0, friendBeatCount = 0;
 
 // One 16x16 frame, drawn once and copied to all four faces.
 static CRGB faceBuf[face::H][face::W];
@@ -116,8 +123,8 @@ static CRGB zonePaletteRgb(int z) {
 // Top row: legend dim across all 16 px, lit up to where the BPM is (0 = none).
 // The last lit pixel, where you are, blinks. `peak` is the power-measuring
 // frame (see loop()): it shows that pixel lit and leaves the fill alone.
-static void drawZoneBar(int bpm, bool connected, bool peak) {
-  static int lastFill = 0;
+// lastFill is per person, so you and your friend each keep your own.
+static void drawZoneBar(int bpm, bool connected, bool peak, int &lastFill) {
   int fill = 0;
   if (connected && bpm > 0) {
     fill = face::barFill(barFraction(bpm) * face::W, lastFill);
@@ -161,7 +168,13 @@ static CRGB zoneRgb(int bpm) {
 
 // peak: draw the brightest this frame can get (heart at the top of its beat or
 // breath, blinking pixel lit), for limitBrightness() to measure.
-static void drawFace(int bpm, bool connected, bool peak) {
+// heartRgb: the heart's full-beat colour (red for you, cyan for your friend).
+// lastBeat: when that heart last beat, for the pulse and the ripple.
+// barFill: that person's bar position, kept between frames (see drawZoneBar).
+// friendFace: the number and ripple take the heart's colour instead of the
+// zone's, so a friend in the blue zone doesn't read as blue-and-cyan.
+static void drawFace(int bpm, bool connected, bool peak, CRGB heartRgb,
+                     unsigned long lastBeat, int &barFill, bool friendFace = false) {
   for (int y = 0; y < face::H; y++)
     for (int x = 0; x < face::W; x++) faceBuf[y][x] = CRGB::Black;
 
@@ -169,24 +182,25 @@ static void drawFace(int bpm, bool connected, bool peak) {
   int n;
   CRGB textColor;
 
-  drawZoneBar(bpm, connected, peak);
+  drawZoneBar(bpm, connected, peak, barFill);
 
   if (connected && bpm > 0) {
     // Never fully dark: still a heart between beats.
-    float lvl = peak ? 1.0f : 0.18f + 0.82f * beatIntensity();
-    CRGB heart(255 * lvl, 20 * lvl, 20 * lvl);
+    float lvl = peak ? 1.0f : 0.18f + 0.82f * beatIntensityAt(lastBeat);
+    CRGB heart = heartRgb;
+    heart.nscale8_video((uint8_t)(255 * lvl));
     for (int y = 0; y < face::H; y++)
       for (int x = 0; x < face::W; x++)
         if (face::heartAt(x, y)) faceBuf[y][x] = heart;
     n = face::bpmGlyphs(bpm, glyphs);
-    textColor = zoneRgb(bpm);
+    textColor = friendFace ? heartRgb : zoneRgb(bpm);
 
 #if RIPPLE_ENABLED
-    unsigned long age = millis() - lastBeatTime;
+    unsigned long age = millis() - lastBeat;
     if (age < RIPPLE_MS) {
       float r = 5.0f + 9.0f * age / RIPPLE_MS;             // ring radius in pixels
       float fade = 1.0f - (float)age / RIPPLE_MS;
-      CRGB c = zoneRgb(bpm);
+      CRGB c = friendFace ? heartRgb : zoneRgb(bpm);
       c.nscale8_video((uint8_t)(70 * fade));
       for (int y = 0; y < face::H; y++)
         for (int x = 0; x < face::W; x++) {
@@ -342,10 +356,34 @@ static void blitRing() {
     for (int x = 0; x < ring::COLS; x++) leds[ringLedIndex(x, y)] = ringBuf[y][x];
 }
 
+static void blitFace(int f) {
+  for (int y = 0; y < face::H; y++)
+    for (int x = 0; x < face::W; x++) leds[ledIndex(f, x, y)] = faceBuf[y][x];
+}
+
 static void blitAllFaces() {
-  for (int f = 0; f < FACE_COUNT; f++)
-    for (int y = 0; y < face::H; y++)
-      for (int x = 0; x < face::W; x++) leds[ledIndex(f, x, y)] = faceBuf[y][x];
+  for (int f = 0; f < FACE_COUNT; f++) blitFace(f);
+}
+
+// The first friend whose strap is connected and sending, or -1.
+static int liveFriend() {
+  for (int i = 0; i < crewCount; i++)
+    if (crew[i].connected && crew[i].bpm > 0) return i;
+  return -1;
+}
+
+// Opposite sides: faces 0 and 2 show you, 1 and 3 your friend (cyan heart).
+// Panels are chained round the ring in order, so even and odd faces sit
+// opposite each other. With no friend connected, all four show you.
+static void drawAndBlitFaces(bool peak) {
+  static int youFill = 0, friendFill = 0;
+  drawFace(currentBPM, hrConnected, peak, HEART_RGB_YOU, lastBeatTime, youFill);
+  int fr = CREW_FACES ? liveFriend() : -1;
+  if (fr < 0) { friendLastBeat = millis(); blitAllFaces(); return; }
+  for (int f = 0; f < FACE_COUNT; f += 2) blitFace(f);
+  if (!peak) advanceBeat(crew[fr].bpm, friendLastBeat, friendBeatCount);   // once per frame
+  drawFace(crew[fr].bpm, true, peak, HEART_RGB_FRIEND, friendLastBeat, friendFill, true);
+  for (int f = 1; f < FACE_COUNT; f += 2) blitFace(f);
 }
 
 // Orientation test: each face shows its chain number (0-3) upright in white,
@@ -405,13 +443,11 @@ void loop() {
   blitRing();
   limitBrightness();
 #else
-  // Measure the frame with the heart at full, then draw the real one at that
+  // Measure the frame with the hearts at full, then draw the real one at that
   // brightness: the cap gives the same answer all through a beat.
-  drawFace(currentBPM, hrConnected, true);
-  blitAllFaces();
+  drawAndBlitFaces(true);
   limitBrightness();
-  drawFace(currentBPM, hrConnected, false);
-  blitAllFaces();
+  drawAndBlitFaces(false);
 #endif
 #endif
   FastLED.show();   // ~23 ms for 768 LEDs (31 ms for the cube's 1024): 30+ fps

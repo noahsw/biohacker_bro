@@ -124,6 +124,12 @@
 //   #define MYNEWT_VAL_BLE_MAX_CONNECTIONS 5
 // (the ESP32 radio itself allows 9). Without that, friends past the second
 // just never appear, and the serial log says why.
+//
+// Read secrets.h now, so its CREW_MAC_* win over the "" defaults below
+// whichever header a file happens to include first.
+#if __has_include("secrets.h")
+#include "secrets.h"
+#endif
 #ifndef CREW_ENABLED
 #define CREW_ENABLED 1
 #endif
@@ -152,3 +158,13 @@
 #define CREW_INITIAL_4 'D'
 #endif
 #define CREW_MAX 4
+
+// --- Friend on the faces (FACES layout) ---
+// 1: when a friend's strap is connected, two opposite faces show them with a
+// cyan heart and number, the other two show you with a red heart. 0: all four show you.
+// Only the first connected friend is shown; the ring layout shows them all.
+#ifndef CREW_FACES
+#define CREW_FACES 1
+#endif
+#define HEART_RGB_YOU    CRGB(255, 20, 20)
+#define HEART_RGB_FRIEND CRGB(0, 200, 255)

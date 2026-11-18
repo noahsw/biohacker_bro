@@ -66,6 +66,13 @@ void onNotify(NimBLERemoteCharacteristic *chr, uint8_t *data, size_t length, boo
   } else {
     bpm = data[1];
   }
+  // Sensor contact: bit 2 = the strap reports it, bit 1 = on skin. A strap
+  // taken off stays connected and keeps sending, often its last BPM, so treat
+  // "reports contact, none detected" as nobody wearing it.
+  // (The COOSPO HW807 armband doesn't report contact. Taken off, it keeps
+  // reading a smoothly rising made-up rate for about a minute, then sends 0;
+  // too much like a real rising rate to filter out.)
+  if ((data[0] & 0x06) == 0x04) bpm = 0;
   peers[i].bpm = bpm;
   peers[i].lastNotifyMs = millis();
 }
