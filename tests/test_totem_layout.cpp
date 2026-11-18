@@ -23,7 +23,7 @@ int main() {
         CHECK(y > face::BAR_Y + 1, "heart on bar row or its gap at %d,%d", x, y);
         CHECK(y < face::DIGIT_Y - 1, "heart touches digits at %d,%d", x, y);
       }
-  CHECK(heartPixels > 40, "heart too small: %d px", heartPixels);
+  CHECK(heartPixels >= 30, "heart too small: %d px", heartPixels);   // 8x6 heart: 32
   // Symmetric about the face's centre line, so it doesn't lean.
   for (int y = 0; y < face::H; y++)
     for (int x = 0; x < face::W; x++)
@@ -44,13 +44,22 @@ int main() {
           if (x > maxx) maxx = x;
         }
     CHECK(lit > 0, "bpm %d draws nothing", bpm);
-    int x0 = face::textX(n), x1 = x0 + face::textWidth(n) - 1;
+    int x0 = face::textX(g, n), x1 = x0 + face::textWidth(g, n) - 1;
     CHECK(x0 >= 0 && x1 < face::W, "bpm %d box %d..%d off panel", bpm, x0, x1);
     int slack = (x0) - (face::W - 1 - x1);   // left margin minus right margin
     CHECK(slack == 0 || slack == 1, "bpm %d not centred (%d)", bpm, slack);
   }
-  { int g[3]; CHECK(face::bpmGlyphs(0, g) == 2 && g[0] == 10, "0 bpm should read --"); }
-  { int g[3]; CHECK(face::bpmGlyphs(128, g) == 3 && g[0] == 1 && g[1] == 2 && g[2] == 8, "128 digits"); }
+  { int g[3]; CHECK(face::bpmGlyphs(0, g) == 2 && g[0] == face::GLYPH_DASH, "0 bpm should read --"); }
+  { int g[3]; CHECK(face::bpmGlyphs(200, g) == 2 && g[0] == face::GLYPH_DASH, "200 bpm would need a wide 2: should read --"); }
+  // Glyph art: every row exactly one cell wide, so a typo can't shift a digit.
+  for (int i = 0; i < 12; i++)
+    for (int r = 0; r < face::DIGIT_H; r++)
+      CHECK(strlen(face::GLYPH[i][r]) == (size_t)face::DIGIT_W, "glyph %d row %d is %d wide", i, r, (int)strlen(face::GLYPH[i][r]));
+  // The narrow 1 only uses its first NARROW_W columns.
+  for (int r = 0; r < face::DIGIT_H; r++)
+    for (int c = face::NARROW_W; c < face::DIGIT_W; c++)
+      CHECK(face::GLYPH[face::GLYPH_NARROW_ONE][r][c] == '.', "narrow 1 spills into column %d", c);
+  { int g[3]; CHECK(face::bpmGlyphs(128, g) == 3 && g[0] == face::GLYPH_NARROW_ONE && g[1] == 2 && g[2] == 8, "128 digits"); }
 
   // Zone bar on 16 px: slices tile the row exactly, fill never shrinks as BPM rises.
   CHECK(zoneSliceX(0, 16) == 0 && zoneSliceX(ZONE_COUNT, 16) == 16, "bar slices don't tile 16 px");
@@ -126,6 +135,22 @@ int main() {
     ring::Person solo[1] = {{'<', 72, true}};
     int one = ring::buildTicker(solo, 1, cols, ring::MAX_COLS);
     CHECK(one > 40 && one < 80, "solo ticker is %d cols", one);
+  }
+
+  // Bar fill: a BPM wobbling across a rounding point holds still, a clear
+  // move goes through, and a jump of several pixels isn't held back.
+  CHECK(face::barFill(1.49f, 2) == 2 && face::barFill(1.71f, 1) == 1, "bar fill flicks at a rounding point");
+  CHECK(face::barFill(1.80f, 1) == 2 && face::barFill(1.20f, 2) == 1, "bar fill stuck after a clear move");
+  CHECK(face::barFill(6.0f, 1) == 6 && face::barFill(0.4f, 5) == 0, "bar fill held back a big jump");
+  {
+    // 62-64 bpm alternating, as in the serial log: the end pixel never moves.
+    int fill = face::barFill(barFraction(63) * face::W, 0), moves = 0;
+    for (int i = 0; i < 40; i++) {
+      int f = face::barFill(barFraction(i % 2 ? 62 : 63) * face::W, fill);
+      if (f != fill) moves++;
+      fill = f;
+    }
+    CHECK(moves == 0, "bar end pixel moved %d times with bpm 62/63", moves);
   }
 
   std::printf("totem layout: %s\n", failures ? "FAILED" : "ok");

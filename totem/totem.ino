@@ -51,7 +51,22 @@ CRGB leds[NUM_LEDS];
 // ---------------------------------------------------------------------------
 TotemDisplay totemDisplay;
 TotemDisplay *display = &totemDisplay;
-void TotemDisplay::setBrightness8(uint8_t b) { FastLED.setBrightness(b); }
+
+// The wheel's brightness. What's actually shown can be lower: see
+// limitBrightness().
+static uint8_t wheelBrightness = BRIGHTNESS_LEVELS[BRIGHTNESS_DEFAULT_LEVEL];
+void TotemDisplay::setBrightness8(uint8_t b) { wheelBrightness = b; FastLED.setBrightness(b); }
+
+// Holds the frame under LED_MAX_MA by lowering the global brightness, based on
+// whatever is in leds[] now. FastLED's own limiter does the same thing every
+// frame on the frame it's showing. Measured that way, every heartbeat changed
+// the result and the whole face, bar included, flickered with the pulse.
+// So the face measures a frame with the heart at its peak and keeps that
+// brightness for the whole beat (see loop()).
+static void limitBrightness() {
+  FastLED.setBrightness(calculate_max_brightness_for_power_mW(leds, NUM_LEDS, wheelBrightness,
+                                                              (uint32_t)LED_MAX_MA * 5));
+}
 
 static int indicatorLevel = 0, indicatorCount = 0;
 static unsigned long indicatorUntil = 0;
@@ -99,17 +114,22 @@ static CRGB zonePaletteRgb(int z) {
 }
 
 // Top row: legend dim across all 16 px, lit up to where the BPM is (0 = none).
-static void drawZoneBar(int bpm, bool connected) {
+// The last lit pixel, where you are, blinks. `peak` is the power-measuring
+// frame (see loop()): it shows that pixel lit and leaves the fill alone.
+static void drawZoneBar(int bpm, bool connected, bool peak) {
+  static int lastFill = 0;
   int fill = 0;
   if (connected && bpm > 0) {
-    fill = (int)(barFraction(bpm) * face::W + 0.5f);
+    fill = face::barFill(barFraction(bpm) * face::W, lastFill);
     if (fill < 1) fill = 1;   // always show something, as on the chest
   }
+  if (!peak) lastFill = fill;
+  bool blinkOff = !peak && (millis() / BAR_BLINK_MS) % 2;
   for (int z = 0; z < ZONE_COUNT; z++) {
     CRGB c = zonePaletteRgb(z);
     for (int x = zoneSliceX(z, face::W); x < zoneSliceX(z + 1, face::W); x++) {
       CRGB p = c;
-      if (x >= fill) p.nscale8_video(56);   // ~22%: the unlit legend
+      if (x >= fill || (blinkOff && x == fill - 1)) p.nscale8_video(56);   // ~22%: the unlit legend
       faceBuf[face::BAR_Y][x] = p;
     }
   }
@@ -130,7 +150,9 @@ static CRGB zoneRgb(int bpm) {
 // Drawing: one 16x16 frame, copied to all four faces
 // ---------------------------------------------------------------------------
 
-static void drawFace(int bpm, bool connected) {
+// peak: draw the brightest this frame can get (heart at the top of its beat or
+// breath, blinking pixel lit), for limitBrightness() to measure.
+static void drawFace(int bpm, bool connected, bool peak) {
   for (int y = 0; y < face::H; y++)
     for (int x = 0; x < face::W; x++) faceBuf[y][x] = CRGB::Black;
 
@@ -138,10 +160,11 @@ static void drawFace(int bpm, bool connected) {
   int n;
   CRGB textColor;
 
-  drawZoneBar(bpm, connected);
+  drawZoneBar(bpm, connected, peak);
 
   if (connected && bpm > 0) {
-    float lvl = 0.18f + 0.82f * beatIntensity();   // never fully dark: still a heart between beats
+    // Never fully dark: still a heart between beats.
+    float lvl = peak ? 1.0f : 0.18f + 0.82f * beatIntensity();
     CRGB heart(255 * lvl, 20 * lvl, 20 * lvl);
     for (int y = 0; y < face::H; y++)
       for (int x = 0; x < face::W; x++)
@@ -166,7 +189,7 @@ static void drawFace(int bpm, bool connected) {
 #endif
   } else {
     // Searching: hollow heart breathing slowly in dim white.
-    float breath = 0.5f + 0.5f * sinf(millis() / 700.0f);
+    float breath = peak ? 1.0f : 0.5f + 0.5f * sinf(millis() / 700.0f);
     uint8_t g = 40 + (uint8_t)(50 * breath);
     for (int y = 0; y < face::H; y++)
       for (int x = 0; x < face::W; x++)
@@ -346,7 +369,13 @@ void setup() {
   Serial.setTxTimeoutMs(0);   // see biohacker_bro.ino: don't block on an unread port
 
   FastLED.addLeds<WS2812B, LED_PIN, GRB>(leds, NUM_LEDS);
+  // Kept as a backstop. limitBrightness() keeps every frame under the cap
+  // already, so this never cuts in.
   FastLED.setMaxPowerInVoltsAndMilliamps(5, LED_MAX_MA);
+  // No temporal dithering. It fakes in-between levels on very dim pixels by
+  // switching them on and off frame to frame. At ~30 fps, with Bluetooth
+  // making frame times uneven, that showed as shimmer on the bar's dim legend.
+  FastLED.setDither(DISABLE_DITHER);
   FastLED.clear(true);
 
   Wire.begin(MPU_SDA, MPU_SCL);   // the wheel's PCA9557 is on this bus; stepSetup() used to start it
@@ -360,12 +389,19 @@ void loop() {
 
 #if TOTEM_ORIENTATION_TEST
   drawOrientationTest();
+  limitBrightness();
 #else
 #if TOTEM_RING
   drawRing(currentBPM, hrConnected);
   blitRing();
+  limitBrightness();
 #else
-  drawFace(currentBPM, hrConnected);
+  // Measure the frame with the heart at full, then draw the real one at that
+  // brightness: the cap gives the same answer all through a beat.
+  drawFace(currentBPM, hrConnected, true);
+  blitAllFaces();
+  limitBrightness();
+  drawFace(currentBPM, hrConnected, false);
   blitAllFaces();
 #endif
 #endif
@@ -375,7 +411,9 @@ void loop() {
   if (millis() - lastStatus > 2000) {
     Serial.printf("hr=%-9s bpm=%3d  crew=", hrConnected ? "CONNECTED" : "scanning", currentBPM);
     for (int i = 0; i < crewCount; i++) Serial.printf("%c:%d ", crew[i].initial, crew[i].connected ? crew[i].bpm : 0);
-    Serial.printf(" bright=%d  est_mA=%lu\r\n", brightnessLevel(),
+    // shown: brightness actually used after the cap, out of the wheel's.
+    Serial.printf(" bright=%d  shown=%d/%d  est_mA=%lu\r\n", brightnessLevel(),
+                  FastLED.getBrightness(), wheelBrightness,
                   (unsigned long)calculate_unscaled_power_mW(leds, NUM_LEDS) / 5);
     lastStatus = millis();
   }
