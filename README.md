@@ -304,6 +304,29 @@ for 20. Two things found on the way:
 Mount the sensor where it will actually ride on the costume before tuning —
 chest versus pocket moves these numbers a lot.
 
+### Totem one-panel wiring test (`totem_panel_test/`)
+
+Lights one 16x16 WS2812B panel on the HUB75 header's R1 pin (GPIO 5), with no
+Bluetooth, Whoop or `secrets.h`, so a dark panel can only mean wiring. Flash it
+before `totem/` the first time a panel is hooked up.
+
+It loops: the whole panel red, green, blue (one second each; wrong colours mean
+the panel isn't GRB), then a white dot walking LED 0 to 255. Where the dot
+starts and whether the rows zigzag tells you the `PANEL_*` flags in
+`totem/totem_config.h`. It runs at brightness 20 with a 0.5 A cap, so the
+laptop's USB is enough: plug the board's `USB-C` input into the Mac and leave
+the battery out. Needs only the FastLED library
+(`arduino-cli lib install FastLED`).
+
+```bash
+FQBN="esp32:esp32:esp32s3:CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=app3M_fat9M_16MB"
+arduino-cli compile --upload -b "$FQBN" -p /dev/cu.usbmodem201101 totem_panel_test
+python3 tools/serial_monitor.py /dev/cu.usbmodem201101 15   # names each step
+```
+
+If nothing lights, the data wire is probably on the wrong HUB75 pin. The header
+carries no power, so moving it to another pin can't damage anything.
+
 ## Host-side tests
 
 ```bash
