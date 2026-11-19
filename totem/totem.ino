@@ -531,12 +531,19 @@ static bool startNextShow() {
                            SHOW_TYPOS, show::rgb(SHOW_TEXT_RGB));
   }
 
+  // Same cap as limitBrightness(): the lower USB one while a computer is
+  // plugged in, if this build has it (LED_MAX_MA_USB_HOST).
+#ifdef LED_MAX_MA_USB_HOST
+  const uint32_t capMw = (uint32_t)ledCapMa() * 5;
+#else
+  const uint32_t capMw = (uint32_t)LED_MAX_MA * 5;
+#endif
   drawNormalRing(true, showNormal);
   uint8_t b = wheelBrightness;
   for (uint32_t t = 0; t < showPlayer.duration(); t += 80) {
     if (showPlayer.render(t, showNormal, p, showFrame) <= 0) continue;
     blitShowFrame(showFrame);
-    uint8_t m = calculate_max_brightness_for_power_mW(leds, NUM_LEDS, wheelBrightness, (uint32_t)LED_MAX_MA * 5);
+    uint8_t m = calculate_max_brightness_for_power_mW(leds, NUM_LEDS, wheelBrightness, capMw);
     if (m < b) b = m;
   }
   showBright = b;
