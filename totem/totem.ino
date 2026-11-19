@@ -65,9 +65,23 @@ void TotemDisplay::setBrightness8(uint8_t b) { wheelBrightness = b; FastLED.setB
 // the result and the whole face, bar included, flickered with the pulse.
 // So the face measures a frame with the heart at its peak and keeps that
 // brightness for the whole beat (see loop()).
+// True while a computer is on the USB-C port (see LED_MAX_MA_USB_HOST). The
+// core's check can drop out for a moment on a healthy link, so a computer
+// counts as gone only after 2 s with no sign of it: a single bad reading
+// would otherwise flash the panels to the full cap off the Mac's port.
+static bool usbHostAttached() {
+  static unsigned long lastSeen = 0;
+  static bool everSeen = false;
+  if (Serial.isPlugged()) { lastSeen = millis(); everSeen = true; }
+  return everSeen && millis() - lastSeen < 2000;
+}
+
+static uint32_t ledCapMa() { return usbHostAttached() ? LED_MAX_MA_USB_HOST : LED_MAX_MA; }
+
 static void limitBrightness() {
-  FastLED.setBrightness(calculate_max_brightness_for_power_mW(leds, NUM_LEDS, wheelBrightness,
-                                                              (uint32_t)LED_MAX_MA * 5));
+  uint32_t capMw = ledCapMa() * 5;
+  FastLED.setMaxPowerInMilliWatts(capMw);   // keep the backstop on the same cap
+  FastLED.setBrightness(calculate_max_brightness_for_power_mW(leds, NUM_LEDS, wheelBrightness, capMw));
 }
 
 static int indicatorLevel = 0, indicatorCount = 0;
@@ -455,8 +469,9 @@ void loop() {
     Serial.printf("hr=%-9s bpm=%3d  crew=", hrConnected ? "CONNECTED" : "scanning", currentBPM);
     for (int i = 0; i < crewCount; i++) Serial.printf("%c:%d ", crew[i].initial, crew[i].connected ? crew[i].bpm : 0);
     // shown: brightness actually used after the cap, out of the wheel's.
-    Serial.printf(" bright=%d  shown=%d/%d  est_mA=%lu\r\n", brightnessLevel(),
+    Serial.printf(" bright=%d  shown=%d/%d  cap=%lumA%s  est_mA=%lu\r\n", brightnessLevel(),
                   FastLED.getBrightness(), wheelBrightness,
+                  (unsigned long)ledCapMa(), usbHostAttached() ? "(usb)" : "",
                   (unsigned long)calculate_unscaled_power_mW(leds, NUM_LEDS) / 5);
     lastStatus = millis();
   }
