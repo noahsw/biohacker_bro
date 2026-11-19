@@ -327,6 +327,30 @@ python3 tools/serial_monitor.py /dev/cu.usbmodem201101 15   # names each step
 If nothing lights, the data wire is probably on the wrong HUB75 pin. The header
 carries no power, so moving it to another pin can't damage anything.
 
+### Totem shows (`totem/show_layout.h`)
+
+Every 10 minutes the totem's heart rate steps aside for one show, about 15 to
+20 seconds, never the same one twice in a row:
+
+- **Ticker spin:** the faces spin round the ring, a stock ticker of your and
+  your friend's heart rates races past (heart, BPM in its zone colour, green or
+  red arrow with the change over the last 10 minutes), then the faces lock back
+  in and the zone bars flash.
+- **Typed messages:** the phrases in `SHOW_PHRASES` typed out Above and Beyond
+  style: cursor blinking on a black screen, a letter at a time with one typo
+  backspaced and fixed, then the line rewinds away. Two cursors on opposite
+  sides of the ring, so half the crowd sees the letters land and everyone sees
+  the words slide past in order.
+
+Settings are section 7 of `totem/totem_config.h`. `SHOW_TEST_MODE 1` plays
+every show back to back with 4 seconds of heart rate between, to check them
+before a night out; `SHOWS_ENABLED 0` turns them off. Each show runs at one
+steady brightness, worked out at its start from its brightest frame so it stays
+under `LED_MAX_MA`. The ticker needs `RING_REVERSE` right: if the faces jump
+between panels instead of flowing round, flip it (the orientation test's
+walking dot shows which way the chain runs). The layout and the font are
+host-tested (`tests/test_show_layout.cpp`).
+
 ## Host-side tests
 
 ```bash
@@ -336,7 +360,7 @@ make -C tests
 Compiles with a plain `c++` — no Arduino toolchain, no board attached — and
 runs in CI on every PR (`.github/workflows/tests.yml`).
 
-**What's tested, and why only this.** Only `hr_zones.cpp`: the BPM-to-zone and
+**What's tested, and why only this.** Mainly `hr_zones.cpp`: the BPM-to-zone and
 zone-to-pixel math. That's the one part of this firmware that can be wrong
 without *looking* wrong — a bar of the wrong length is still a plausible bar.
 Everything else is I/O against hardware that can't be exercised off-device,
