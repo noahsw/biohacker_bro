@@ -495,12 +495,11 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
   // 100. Accepted: crossing 100 is either a one-way trip for the night or a
   // brief excursion, so the heart is not going to flicker back and forth, and
   // the row being centred is worth a rare 6px slide.
-  uint16_t bpmColor = connected ? zoneColor(bpm) : display->color565(70, 70, 70);
-  if (connected) {
-    snprintf(buf, sizeof(buf), "%d", bpm);
-  } else {
-    snprintf(buf, sizeof(buf), "--");
-  }
+  //
+  // With no strap there's no number at all, just the heart, centred on its
+  // own and beating at IDLE_HEART_BPM (see the loop()).
+  uint16_t bpmColor = zoneColor(bpm);
+  snprintf(buf, sizeof(buf), "%d", bpm);
 
   // Width of the number as it will actually render, which needs the font set
   // first — so the style is selected here and the drawing below just uses it.
@@ -509,7 +508,9 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
   int16_t nbx = 0, nby;
   uint16_t nbw = 0, nbh;
   int numW;
-  if (bpmStyle == BPM_SEVEN_SEG) {
+  if (!connected) {
+    numW = 0;
+  } else if (bpmStyle == BPM_SEVEN_SEG) {
     int n = (int)strlen(buf);
     numW = n * SEVENSEG_W + (n - 1) * SEVENSEG_GAP;
   } else {
@@ -530,10 +531,11 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
   const int heartW = hrHeartWidth(HEART_SCALE);
   const int hrBlkX = hrBlockX(numW, heartW, PANEL_WIDTH);
   const int numRightX = hrNumRightX(hrBlkX, numW);
+  const int heartCX = connected ? hrHeartCX(hrBlkX, numW, HEART_SCALE) : PANEL_WIDTH / 2;
 
   // --- Heart: always red (it's a heart), pulsing in brightness on each beat.
-  // Dimmed to a dark ember while we're still hunting for the strap, so a
-  // stale reading can never look live.
+  // It pulses the same with no strap connected (at IDLE_HEART_BPM), so the
+  // panel never looks dead; the missing number says it isn't live.
   //
   // The beat lives here rather than on the digits or the bar. Tried it on the
   // digits and it reads as a failing display, not a pulse — the heart SHAPE is
@@ -545,13 +547,8 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
   // lower floor was tried to make the pulse deeper and read as jerky -- see
   // the note on beatIntensity(), which that squaring was also secretly
   // halving. The heart glows and surges rather than blinking.
-  uint16_t heartColor;
-  if (connected) {
-    float level = HEART_FLOOR + (1.0f - HEART_FLOOR) * beatIntensity();
-    heartColor = display->color565((int)(255 * level), (int)(20 * level), (int)(20 * level));
-  } else {
-    heartColor = display->color565(50, 0, 0);
-  }
+  float level = HEART_FLOOR + (1.0f - HEART_FLOOR) * beatIntensity();
+  uint16_t heartColor = display->color565((int)(255 * level), (int)(20 * level), (int)(20 * level));
   // scale 4 spans [cy-6, cy+8] = 15 rows, so cy=12 puts it on rows 6..20: the
   // same 15-row height as the digits. Dropped from scale 5 to make that margin
   // fit; the number and the heart being the same height is worth more than 3px
@@ -564,11 +561,12 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
   // area at about row 11, matching the digits' centre — so this is aligned by
   // MASS, which is what the eye measures, and the boxes sitting a row apart
   // is the price.
-  drawHeart(hrHeartCX(hrBlkX, numW, HEART_SCALE), HEART_CY, HEART_SCALE,
-            heartColor);
+  drawHeart(heartCX, HEART_CY, HEART_SCALE, heartColor);
 
   // --- The number itself, in the current zone's hue at a constant brightness.
-  if (bpmStyle == BPM_BUILTIN_2) {
+  if (!connected) {
+    // No number while there's no strap.
+  } else if (bpmStyle == BPM_BUILTIN_2) {
     // Built-in font: y is the TOP row, not the baseline, so 6 puts the 14px
     // digits on rows 6..19 against the heart's 6..20 — tops flush, the
     // heart's point hanging one row below, which is the same relationship the
@@ -581,9 +579,7 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
     display->setTextSize(1);
   } else if (bpmStyle == BPM_SEVEN_SEG) {
     // Laid out by hand rather than through GFX: 11px cells with a 2px gap,
-    // sharing the block's right edge with the other BPM styles. "--" while
-    // disconnected becomes middle bars only, which is what a real instrument
-    // with no signal shows.
+    // sharing the block's right edge with the other BPM styles.
     const int CW = SEVENSEG_W, CH = SEVENSEG_H, CT = SEVENSEG_T;
     const int GAP = SEVENSEG_GAP, TOP = SEVENSEG_TOP_Y;
     int n = (int)strlen(buf);

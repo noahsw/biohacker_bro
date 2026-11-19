@@ -223,14 +223,20 @@ static void drawFace(int bpm, bool connected, bool peak, CRGB heartRgb,
     }
 #endif
   } else {
-    // Searching: hollow heart breathing slowly in dim white.
-    float breath = peak ? 1.0f : 0.5f + 0.5f * sinf(millis() / 700.0f);
-    uint8_t g = 40 + (uint8_t)(50 * breath);
+    // Searching: the same heart beating at IDLE_HEART_BPM, with no number.
+    // A panel that looks dead reads as broken; the missing number is enough
+    // to say there's no strap. Its own beat clock, so the ring's EKG (which
+    // spikes on your real beats) doesn't pick it up.
+    static unsigned long idleLastBeat = 0, idleBeatCount = 0;
+    if (!peak) advanceBeat(IDLE_HEART_BPM, idleLastBeat, idleBeatCount);
+    float lvl = peak ? 1.0f : 0.18f + 0.82f * beatIntensityAt(idleLastBeat);
+    CRGB heart = heartRgb;
+    heart.nscale8_video((uint8_t)(255 * lvl));
     for (int y = 0; y < face::H; y++)
       for (int x = 0; x < face::W; x++)
-        if (face::heartEdgeAt(x, y)) faceBuf[y][x] = CRGB(g, g, g);
-    n = face::bpmGlyphs(0, glyphs);   // "--"
-    textColor = CRGB(70, 70, 70);
+        if (face::heartAt(x, y)) faceBuf[y][x] = heart;
+    n = 0;
+    textColor = CRGB::Black;
   }
 
   // Brightness pips replace the number for two seconds after a wheel change.
