@@ -164,3 +164,8 @@ const uint8_t BRIGHTNESS_LEVELS[] = {36, 53, 90, 140, 200};
 // The top of the Z4/5 band, used only to compute progress ACROSS that last
 // segment of the bar (there's no zone above it to spill into).
 #define ZONE_MAX_BPM 140
+
+// With no strap connected the heart keeps beating at this rate, with no
+// number beside it. A dead-looking panel reads as broken; a heart with no
+// number is obvious enough as "not connected".
+#define IDLE_HEART_BPM 60
