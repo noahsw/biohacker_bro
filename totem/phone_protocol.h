@@ -19,6 +19,7 @@
 //   STOP              end the show that's on, back to heart rate
 //   PAUSE 1 / PAUSE 0 stop / restart the every-5-minutes shows (playing by hand still works)
 //   BRIGHT 3          brightness level, 1 = dimmest, same levels as the wheel
+//   POWER 0 / POWER 1 lights off (all LEDs dark, Bluetooth stays up) / back on
 //
 // Plain text rather than bytes so the serial log and a BLE app like LightBlue
 // can show and send them as they are.
@@ -28,7 +29,7 @@ namespace phone {
 const int MAX_TEXT = 60;   // show::MAX_CHARS: longer is cut there anyway
 
 struct Command {
-  enum Kind : uint8_t { NONE, PIN, SAY, PLAY, STOP, PAUSE, BRIGHT };
+  enum Kind : uint8_t { NONE, PIN, SAY, PLAY, STOP, PAUSE, BRIGHT, POWER };
   Kind kind = NONE;
   int arg = 0;
   char text[MAX_TEXT + 1] = {0};   // PIN: the code tried; SAY: the text
@@ -95,6 +96,10 @@ inline bool parse(const uint8_t *data, size_t len, Command &out) {
     return parseInt(rest, out.arg) && out.arg <= 1;
   }
   if (startsWord(buf, "BRIGHT", rest)) { out.kind = Command::BRIGHT; return parseInt(rest, out.arg); }
+  if (startsWord(buf, "POWER", rest)) {
+    out.kind = Command::POWER;
+    return parseInt(rest, out.arg) && out.arg <= 1;
+  }
   return false;
 }
 
