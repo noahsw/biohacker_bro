@@ -10,7 +10,8 @@
   the same thing at once: the chest display's zone bar on top, a heart pulsing
   on your beats, and your BPM in the zone's colour. When a friend's strap is
   connected (CREW_FACES), two opposite faces switch to them: a cyan heart beating
-  on their beats; bar, number and colours otherwise the same as yours.
+  on their beats; bar, number and colours otherwise the same as yours. If your
+  Whoop drops out while a friend is live, all four faces show the friend.
 
   SHOWS (faces layout): every 10 minutes the heart rate steps aside for one
   short show, never the same one twice running (show_layout.h):
@@ -75,9 +76,23 @@ void TotemDisplay::setBrightness8(uint8_t b) { wheelBrightness = b; FastLED.setB
 // the result and the whole face, bar included, flickered with the pulse.
 // So the face measures a frame with the heart at its peak and keeps that
 // brightness for the whole beat (see loop()).
+// True while a computer is on the USB-C port (see LED_MAX_MA_USB_HOST). The
+// core's check can drop out for a moment on a healthy link, so a computer
+// counts as gone only after 2 s with no sign of it: a single bad reading
+// would otherwise flash the panels to the full cap off the Mac's port.
+static bool usbHostAttached() {
+  static unsigned long lastSeen = 0;
+  static bool everSeen = false;
+  if (Serial.isPlugged()) { lastSeen = millis(); everSeen = true; }
+  return everSeen && millis() - lastSeen < 2000;
+}
+
+static uint32_t ledCapMa() { return usbHostAttached() ? LED_MAX_MA_USB_HOST : LED_MAX_MA; }
+
 static void limitBrightness() {
-  FastLED.setBrightness(calculate_max_brightness_for_power_mW(leds, NUM_LEDS, wheelBrightness,
-                                                              (uint32_t)LED_MAX_MA * 5));
+  uint32_t capMw = ledCapMa() * 5;
+  FastLED.setMaxPowerInMilliWatts(capMw);   // keep the backstop on the same cap
+  FastLED.setBrightness(calculate_max_brightness_for_power_mW(leds, NUM_LEDS, wheelBrightness, capMw));
 }
 
 static int indicatorLevel = 0, indicatorCount = 0;
@@ -219,14 +234,20 @@ static void drawFace(int bpm, bool connected, bool peak, CRGB heartRgb,
     }
 #endif
   } else {
-    // Searching: hollow heart breathing slowly in dim white.
-    float breath = peak ? 1.0f : 0.5f + 0.5f * sinf(millis() / 700.0f);
-    uint8_t g = 40 + (uint8_t)(50 * breath);
+    // Searching: the same heart beating at IDLE_HEART_BPM, with no number.
+    // A panel that looks dead reads as broken; the missing number is enough
+    // to say there's no strap. Its own beat clock, so the ring's EKG (which
+    // spikes on your real beats) doesn't pick it up.
+    static unsigned long idleLastBeat = 0, idleBeatCount = 0;
+    if (!peak) advanceBeat(IDLE_HEART_BPM, idleLastBeat, idleBeatCount);
+    float lvl = peak ? 1.0f : 0.18f + 0.82f * beatIntensityAt(idleLastBeat);
+    CRGB heart = heartRgb;
+    heart.nscale8_video((uint8_t)(255 * lvl));
     for (int y = 0; y < face::H; y++)
       for (int x = 0; x < face::W; x++)
-        if (face::heartEdgeAt(x, y)) faceBuf[y][x] = CRGB(g, g, g);
-    n = face::bpmGlyphs(0, glyphs);   // "--"
-    textColor = CRGB(70, 70, 70);
+        if (face::heartAt(x, y)) faceBuf[y][x] = heart;
+    n = 0;
+    textColor = CRGB::Black;
   }
 
   // Brightness pips replace the number for two seconds after a wheel change.
@@ -383,10 +404,23 @@ static int liveFriend() {
 // Opposite sides: faces 0 and 2 show you, 1 and 3 your friend (cyan heart).
 // Panels are chained round the ring in order, so even and odd faces sit
 // opposite each other. With no friend connected, all four show you.
+//
+// If your Whoop drops out (taken off, out of range) while a friend's strap is
+// still live, all four faces show the friend instead of two idle hearts, so
+// the totem keeps going while you step away. This ignores CREW_FACES: it's
+// about not having dead faces, not about showing friends.
 static void drawAndBlitFaces(bool peak) {
   static int youFill = 0, friendFill = 0;
+  bool youLive = hrConnected && currentBPM > 0;
+  int fr = liveFriend();
+  if (!youLive && fr >= 0) {
+    if (!peak) advanceBeat(crew[fr].bpm, friendLastBeat, friendBeatCount);   // once per frame
+    drawFace(crew[fr].bpm, true, peak, HEART_RGB_FRIEND, friendLastBeat, friendFill);
+    blitAllFaces();
+    return;
+  }
   drawFace(currentBPM, hrConnected, peak, HEART_RGB_YOU, lastBeatTime, youFill);
-  int fr = CREW_FACES ? liveFriend() : -1;
+  if (!CREW_FACES) fr = -1;
   if (fr < 0) { friendLastBeat = millis(); blitAllFaces(); return; }
   for (int f = 0; f < FACE_COUNT; f += 2) blitFace(f);
   if (!peak) advanceBeat(crew[fr].bpm, friendLastBeat, friendBeatCount);   // once per frame
@@ -637,8 +671,9 @@ void loop() {
     Serial.printf("hr=%-9s bpm=%3d  crew=", hrConnected ? "CONNECTED" : "scanning", currentBPM);
     for (int i = 0; i < crewCount; i++) Serial.printf("%c:%d ", crew[i].initial, crew[i].connected ? crew[i].bpm : 0);
     // shown: brightness actually used after the cap, out of the wheel's.
-    Serial.printf(" bright=%d  shown=%d/%d  est_mA=%lu\r\n", brightnessLevel(),
+    Serial.printf(" bright=%d  shown=%d/%d  cap=%lumA%s  est_mA=%lu\r\n", brightnessLevel(),
                   FastLED.getBrightness(), wheelBrightness,
+                  (unsigned long)ledCapMa(), usbHostAttached() ? "(usb)" : "",
                   (unsigned long)calculate_unscaled_power_mW(leds, NUM_LEDS) / 5);
     lastStatus = millis();
   }

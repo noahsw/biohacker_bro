@@ -93,7 +93,7 @@ void setup() {
 void loop() {
   bleLoop();
   stepLoop();
-  updateHeartbeatPhase(currentBPM);
+  updateHeartbeatPhase(hrConnected && currentBPM > 0 ? currentBPM : IDLE_HEART_BPM);
 
   drawMainScreen(currentBPM, hrConnected, stepCount);
 
