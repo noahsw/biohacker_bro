@@ -12,7 +12,9 @@
 //
 //   1. Bass well under its usual level (QUIET_DB under the baseline) for at
 //      least BUILD_MIN_S, while the rest of the music keeps going (that's
-//      what tells a breakdown from silence between sets).
+//      what tells a breakdown from silence between sets). The bass has to
+//      have been in first: music fading up out of silence with the beat
+//      still to come isn't a breakdown, so its first kick isn't a drop.
 //   2. Then, within RISE_MS of leaving the quiet, bass back to near its usual
 //      level and JUMP_DB above where the breakdown sat, held for a few
 //      blocks so a single thump doesn't count.
@@ -35,11 +37,12 @@ namespace drop {
 
 struct Params {
   float quietDb    = 9.0f;    // bass this far under the baseline = bass is out
-  float buildMinS  = 5.0f;    // bass out at least this long before a drop counts
+  float buildMinS  = 2.0f;    // bass out at least this long before a drop counts
   float buildMaxS  = 120.0f;  // out longer than this: not a breakdown; relearn the room
   float returnDb   = 6.0f;    // drop: bass back to within this of the baseline...
   float jumpDb     = 10.0f;   // ...and at least this far above the breakdown's level...
   float riseMs     = 700.0f;  // ...within this long of the bass last being out
+  float riseDb     = 8.0f;    // ...and at least this far up on where it was riseMs (+300 ms) ago: a slam, not a sweep
   float cooldownS  = 90.0f;   // no second drop for this long
   float silenceDb  = 20.0f;   // whole sound this far under its baseline = silence, not a breakdown
   float minLevelDb = -80.0f;  // bass baseline must be above this (dBFS at 0 dB gain): ignore a quiet room
@@ -96,6 +99,7 @@ public:
   static const int WIN = 15;                   // 300 ms: smooths over the gaps between kicks
   static const int SECS = 60;                  // a minute of once-a-second levels for the baseline
   static const int HOLD_BLOCKS = 3;            // drop condition held this many blocks (60 ms)
+  static const int RISE_HIST = 64;             // 1.28 s of bass levels, for "did it jump just now"
 
   void begin(const Params &p) {
     P = p;
@@ -145,8 +149,8 @@ public:
     memset(win, 0, sizeof(win)); memset(fwin, 0, sizeof(fwin));
     winN = winI = 0; nSecs = secI = 0;
     secBass = secFull = 0; secBlocks = 0;
-    phase = WARMUP; candidate = false; quietStart = 0; aboveSince = 0; lastQuiet = 0;
-    bdSum = 0; bdN = 0; holdRun = 0;
+    phase = WARMUP; candidate = false; armed = false; quietStart = 0; aboveSince = 0; lastQuiet = 0;
+    bdSum = 0; bdN = 0; holdRun = 0; histI = histN = 0;
     S.phase = WARMUP; S.candidate = false;
   }
 
@@ -169,10 +173,26 @@ private:
   uint32_t now = 0, cooldownUntil = 0;
   Phase phase = WARMUP;
   bool candidate = false;
+  bool armed = false;       // bass has been in since the last silence: a breakdown can start
   uint32_t quietStart = 0, aboveSince = 0, lastQuiet = 0;
   double bdSum = 0;
   int bdN = 0, holdRun = 0;
+  float hist[RISE_HIST];          // recent bass levels (dB), one per block
+  int histI = 0, histN = 0;
   Snapshot S;
+
+  // The lowest bass level in the last ms milliseconds (the window's own
+  // 300 ms included, so a slam that the window smears still counts).
+  float recentMin(float ms) const {
+    int n = (int)((ms + WIN * BLOCK_MS) / BLOCK_MS);
+    if (n > histN) n = histN;
+    float m = 0;
+    for (int i = 0; i < n; i++) {
+      float v = hist[(histI - 1 - i + RISE_HIST) % RISE_HIST];
+      if (i == 0 || v < m) m = v;
+    }
+    return m;
+  }
 
   static float db(double p) { return 10.0f * log10f((float)p + 1e-15f); }
 
@@ -230,8 +250,12 @@ private:
     float thr = base - P.quietDb;
     bool tooQuiet = base < P.minLevelDb;
     bool silent = F < fullBase - P.silenceDb;
+    hist[histI] = L; histI = (histI + 1) % RISE_HIST;
+    if (histN < RISE_HIST) histN++;
     bool bassOut = L < thr;
-    bool quietNow = phase != WARMUP && bassOut && !silent && !tooQuiet;
+    if (silent || tooQuiet) armed = false;
+    else if (!bassOut) armed = true;
+    bool quietNow = phase != WARMUP && bassOut && !silent && !tooQuiet && (armed || candidate);
 
     // Learn the room only while the bass is in (or still warming up).
     bool learning = phase == WARMUP || (phase == LISTEN && !candidate);
@@ -271,7 +295,9 @@ private:
         }
         if (!aboveSince) aboveSince = now;
         bool sharp = now - lastQuiet <= P.riseMs;
-        bool back = L >= base - P.returnDb && L >= bd + P.jumpDb && !silent;
+        // A drop slams back: JUMP_DB up on the breakdown, and RISE_DB up on
+        // where the bass was a moment ago, so a slow sweep back in isn't one.
+        bool back = L >= base - P.returnDb && L >= bd + P.jumpDb && L >= recentMin(P.riseMs) + P.riseDb && !silent;
         holdRun = back && sharp ? holdRun + 1 : 0;
         if (holdRun >= HOLD_BLOCKS) {
           if (now >= cooldownUntil) {

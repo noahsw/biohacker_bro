@@ -27,6 +27,7 @@ struct Part {
   float seconds;
   bool kick, bass, hats, pads, snareRoll, riser, silent;
   float lowpassSweep = 0;   // >0: kick+bass fade in through a low-pass opening over this part (no drop)
+  bool fadeIn = false;      // the whole part fades up from 30 dB down (a set starting, the volume coming up)
 };
 
 // Renders the track into stereo 16-bit at `level` (1 = loud), with a little
@@ -69,6 +70,7 @@ static std::vector<int16_t> render(const std::vector<Part> &parts, float level, 
         float f = 300 + 1700 * pt / p.seconds;
         s += 0.10f * (pt / p.seconds) * sinf(2 * PI * f * pt);
       }
+      if (p.fadeIn) s *= powf(10.0f, -1.5f * (1 - pt / p.seconds));
       if (p.silent) s = 0;
       lpState = s;
       float room = 0.0005f * noise();
@@ -132,7 +134,7 @@ int main() {
     {30, false, false, false, true, false, false, false},  // 1 breakdown: pads only
     {14, false, false, true, true, true, true, false},     // 2 build: snare roll + riser
     {60, true, true, true, true, false, false, false},     // 3 DROP
-    {3, false, false, true, true, false, false, false},    // 4 a 3 s gap: too short
+    {1.5f, false, false, true, true, false, false, false}, // 4 a 1.5 s gap: too short
     {30, true, true, true, true, false, false, false},     // 5
     {20, false, false, false, true, false, false, false},  // 6 second breakdown...
     {8, false, false, true, true, true, true, false},      //   ...and build
@@ -172,6 +174,19 @@ int main() {
   std::vector<float> qs;
   std::vector<int16_t> q = render(quick, 0.9f, &qs);
   expectDrops("cooldown", run(q), {qs[3]});
+
+  // Silence, then the music fades up with the beat still to come, then the
+  // kick lands: the bass was never in, so it isn't a breakdown or a drop.
+  {
+    std::vector<Part> fade = {
+      {40, true, true, true, true, false, false, false},
+      {12, false, false, false, false, false, false, true},
+      {8, false, false, true, true, true, true, false, 0, true},
+      {30, true, true, true, true, false, false, false},
+    };
+    expectDrops("fade up from silence", run(render(fade, 0.9f)), {});
+    expectDrops("fade up from silence, living room", run(render(fade, 0.9f * 0.0316f), 24), {});
+  }
 
   // Warm-up: a drop in the first 20 s can't be judged yet.
   std::vector<Part> early = {

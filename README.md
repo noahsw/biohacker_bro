@@ -404,7 +404,7 @@ host-tested (`tests/test_phone_protocol.cpp`).
 ### Totem beat drop (`totem/audio_drop.cpp`, off by default)
 
 The board's two mics listen to the bass (about 40-150 Hz, the kick and bass
-line). A drop is the bass gone for at least 5 s while the music carries on (a
+line). A drop is the bass gone for at least 2 s while the music carries on (a
 breakdown and build), then back within 0.7 s, 10 dB or more above where the
 breakdown sat. On a drop the ring gets a 2.6 s burst over whatever it's
 showing: one white flash (no strobing), rainbow shock bands out to the top and
@@ -416,7 +416,11 @@ last minute, learned only while the bass is in, so a long breakdown doesn't
 become the new normal and the same settings work in a living room and at a
 festival. Levels are measured net of the mic gain, which steps down 3 dB a
 second while the mic clips and up after 20 quiet seconds. Silence (between
-sets) isn't a breakdown, and bass fading back in slowly isn't a drop.
+sets) isn't a breakdown, and neither is music fading up out of silence with
+the beat still to come: the bass has to have been in first. The bass has to
+slam back, at least 8 dB up on where it was a second earlier, so bass fading
+or sweeping back in isn't a drop. It's tuned to miss a borderline drop rather
+than fire on something that isn't one.
 
 The mics are on the **ES7210** (I2C 0x40), not the ES8311 (0x18, the speaker
 side). Audio power comes from a regulator switched by the PCA9557's IO5, off

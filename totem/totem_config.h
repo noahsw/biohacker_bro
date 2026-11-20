@@ -290,7 +290,7 @@
 #define DROP_GAIN_MIN_DB   0
 #define DROP_GAIN_MAX_DB   33
 #define DROP_QUIET_DB      9     // bass this far under its usual level = bass is out
-#define DROP_BUILD_MIN_S   5     // bass out at least this long before a drop counts
+#define DROP_BUILD_MIN_S   2     // bass out at least this long before a drop counts
 #define DROP_JUMP_DB       10    // the drop: bass jumps back at least this much, fast
 #define DROP_COOLDOWN_S    90    // no second burst for this long
 #define DROP_MIN_LEVEL_DB  -80   // usual bass must be above this (dB, gain taken off): ignores a quiet room
