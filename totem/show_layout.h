@@ -9,27 +9,23 @@
 // Both shows draw onto the whole ring: 64 columns round (the four faces in
 // chain order, see ringBlockPanel() in totem.ino) by 16 rows.
 //
-// TYPED MESSAGE (Above and Beyond style)
-//   The heart rate fades out and a cursor blinks on a black screen. Then the
-//   phrase is typed, one letter at a time, at a human pace with a little
-//   jitter, in 10 px tall bold capitals. The ring is split into two halves,
-//   each with its own cursor, opposite each other, so half the crowd sees the
-//   letters land head-on. The line slides left away from the cursor like a
-//   terminal scrolling sideways and dissolves at the far end of its half, so
-//   anyone standing anywhere sees the words pass in order, never a jumble of
-//   two copies side by side. Once per phrase it hits a neighbouring key,
-//   sometimes types one more letter, notices, backspaces and fixes it. When
-//   the phrase is done the cursor blinks for a couple of seconds, then the
-//   whole line is held-backspaced away (it rewinds back through the phrase),
-//   the cursor blinks once more and the heart rate fades back in.
+// SCROLLING MESSAGE
+//   The heart rate fades out, then a phrase in 7 px tall thin capitals
+//   (showfont::LIGHT) scrolls the whole way round the ring at one steady
+//   speed, in whole-pixel steps (a sub-pixel blend looked smeared behind the
+//   diffuser). Block 3 is the seam: the letters fade in out of it on one
+//   side, its middle stays dark so people can tell where the line starts, and
+//   they fade out into its other side. It comes round a few times (repeats),
+//   a panel's width apart, so the crowd gets more than one go at reading it.
+//   Once the last letter has gone the heart rate fades back in.
 //
 // TICKER SPIN
-//   The four faces start sliding round the ring, faster and faster, and
-//   behind them comes a stock ticker: a pulsing heart, the BPM in its zone
-//   colour, and a green up or red down arrow with how much it moved over the
-//   last 10 minutes. Yours (red heart), then your friend's (cyan), twice
-//   round. Then the faces come round again, slow down, bump into place and
-//   the zone bars flash.
+//   The four faces start sliding round the ring, faster and faster, go round
+//   a lap or two, slow down, bump into place and the zone bars flash.
+//   Optionally (numbers, off by default) a stock ticker comes round behind
+//   them first: a pulsing heart, the BPM in its zone colour, and a green up or
+//   red down arrow with how much it moved over the last 10 minutes. Yours
+//   (red heart), then your friend's (cyan), twice round.
 
 #include <stdint.h>
 #include <math.h>
@@ -40,7 +36,12 @@
 namespace show {
 
 const int COLS = 64, ROWS = 16, FACE = 16;
-const int TEXT_Y = 3;            // big text on rows 3..12
+const int TEXT_Y = 3;            // ticker's bold text on rows 3..12
+
+// The messages' font, centred: rows 4..10.
+static const showfont::Font &PHRASE_FONT = showfont::LIGHT;
+const int PH = 7;                // PHRASE_FONT.h, as a constant for array sizes
+const int PHRASE_Y = (16 - PH) / 2;
 
 typedef Rgb Frame[ROWS][COLS];
 
@@ -57,186 +58,98 @@ inline Rgb mixc(Rgb a, Rgb b, float k) {   // a -> b
              (uint8_t)(a.b + (b.b - a.b) * k + 0.5f));
 }
 
-// Small deterministic random numbers (xorshift), so a seed always gives the
-// same typing, and the host tests and GIFs match the totem.
-struct Rng {
-  uint32_t s;
-  explicit Rng(uint32_t seed) : s(seed ? seed : 0x9E3779B9u) {}
-  uint32_t next() { s ^= s << 13; s ^= s >> 17; s ^= s << 5; return s; }
-  int range(int lo, int hi) { return lo + (int)(next() % (uint32_t)(hi - lo + 1)); }   // inclusive
-  float unit() { return (next() & 0xFFFFFF) / 16777216.0f; }
-};
-
 // ---------------------------------------------------------------------------
-// Typing
+// Scrolling message
 // ---------------------------------------------------------------------------
 const int MAX_CHARS = 60;
-const int MAX_EVENTS = 2 * MAX_CHARS + 12;
-enum EvKind : uint8_t { TYPE = 0, BACK = 1 };
-struct Event { uint32_t t; uint8_t kind; char c; };
 
 // Message timeline, ms from the start of the show.
 const uint32_t FADE_OUT_MS = 450;     // heart rate fades to black
-const uint32_t CURSOR_IN_MS = 650;    // cursor appears
-const uint32_t BLINK_MS = 400;        // cursor on 400, off 400 while idle
-const uint32_t TYPE_START_MS = CURSOR_IN_MS + 4 * BLINK_MS;   // two blinks, then typing
-const uint32_t SOLID_MS = 500;        // cursor stays solid this long after a key
-const uint32_t HOLD_MS = 2400;        // finished phrase sits there, cursor blinking
-const uint32_t REWIND_MS = 55;        // held backspace: one letter every 55 ms
-const uint32_t AFTER_EMPTY_MS = 1300; // cursor blinks once on the empty line
-const uint32_t BLACK_MS = 150;
+const uint32_t SCROLL_AT_MS = 650;    // the first letter starts out of the seam
+const uint32_t BLACK_MS = 300;        // dark once the last letter has gone
 const uint32_t FADE_IN_MS = 550;      // heart rate fades back in
+const int REPEAT_GAP = 16;            // dark columns between one time round and the next
 
-// Each half of the ring (32 columns, two panels) shows the line:
-//   cols 0..7    where the oldest letters dissolve (fade in from dark)
-//   col  8       where the first letter lands
-//   cols 25..26  where the cursor settles once the line is long
-//   cols 27..31  room for the newest letter while the line glides over
-const int HALF = 32;
-const int CURSOR_W = 2;
-const int LEFT = 8;
-const int CURSOR_RIGHT = 26;
-const int FADE_COLS = 8;
-const float MAX_LAG = 6.0f;      // columns the glide may trail behind the cursor
+// The line's columns v = 0..63 start part way across block 3, the seam panel
+// (ring column RING_AT_V0), so blocks 0-2 are the full-brightness middle and
+// block 3 holds both ends. The text moves towards v = 0:
+//   v  0..4    ring 59..63  letters fade out
+//   v  5..52   ring 0..47   full brightness (blocks 0-2)
+//   v 53..57   ring 48..52  letters fade in
+//   v 58..63   ring 53..58  dark: the seam
+const int SPAN = COLS;
+const int FADE_COLS = 5;
+const int RING_AT_V0 = COLS - FADE_COLS;
+const int FULL_END = FADE_COLS + COLS - FACE;   // first v past the full-brightness part
+const int DARK_FROM = FULL_END + FADE_COLS;
 
-// The QWERTY keys either side, for a believable typo.
-inline char neighbourKey(char c, Rng &rng) {
-  static const char *const ROWS_[3] = {"QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"};
-  for (int r = 0; r < 3; r++) {
-    const char *row = ROWS_[r];
-    int n = (int)strlen(row);
-    for (int i = 0; i < n; i++)
-      if (row[i] == c) {
-        if (i == 0) return row[1];
-        if (i == n - 1) return row[n - 2];
-        return row[i + ((rng.next() & 1) ? 1 : -1)];
-      }
-  }
-  return c == 'A' ? 'S' : 'A';
+// How bright line column v is: fading out, full, fading in, dark.
+inline float columnFade(int v) {
+  if (v < 0) return 0;
+  if (v < FADE_COLS) return (float)(v + 1) / (FADE_COLS + 1);
+  if (v < FULL_END) return 1;
+  if (v < DARK_FROM) return (float)(DARK_FROM - v) / (FADE_COLS + 1);
+  return 0;
 }
-
-inline bool isLetter(char c) { return c >= 'A' && c <= 'Z'; }
 
 // Width of a character plus the gap after it.
 inline int advance(char c) {
-  const showfont::Glyph *g = showfont::find(c);
+  const showfont::Glyph *g = showfont::find(PHRASE_FONT, c);
   return g ? showfont::width(g) + showfont::GAP : 0;
 }
 
-struct Typing {
+struct Message {
   char text[MAX_CHARS + 1];   // the phrase, uppercased, unknown characters dropped
   int len;
-  Event ev[MAX_EVENTS];
-  int n;
-  int typoAt;                 // index of the letter that gets fumbled, -1 for none
-  uint32_t typedAt;           // last letter of the phrase lands
-  uint32_t emptyAt;           // last rewind backspace
-  uint32_t cursorOutAt, fadeInAt, endAt;
+  int width;                  // in columns, gaps between letters included
+  int repeats;                // times round
+  float pxPerMs;
+  uint32_t scrolledAt;        // the last letter has gone
+  uint32_t fadeInAt, endAt;
 
-  // cps: letters per second on average. typo: one fumble or none.
-  void build(const char *phrase, uint32_t seed, float cps, bool typo) {
-    Rng rng(seed);
+  void build(const char *phrase, float pxPerS, int repeats_ = 1) {
+    repeats = repeats_ < 1 ? 1 : repeats_;
     len = 0;
     for (int i = 0; phrase[i] && len < MAX_CHARS; i++) {
       char c = showfont::upper(phrase[i]);
-      if (showfont::find(c) && !(c == ' ' && (len == 0 || text[len - 1] == ' '))) text[len++] = c;
+      if (showfont::find(PHRASE_FONT, c) && !(c == ' ' && (len == 0 || text[len - 1] == ' '))) text[len++] = c;
     }
     while (len > 0 && text[len - 1] == ' ') len--;
     text[len] = 0;
-
-    // The fumble lands mid-word, away from both ends of the phrase.
-    typoAt = -1;
-    if (typo) {
-      int cand[MAX_CHARS], nc = 0;
-      for (int i = 3; i < len - 2; i++)
-        if (isLetter(text[i]) && isLetter(text[i - 1])) cand[nc++] = i;
-      if (nc) typoAt = cand[rng.next() % nc];
-    }
-
-    if (cps < 1.0f) cps = 1.0f;
-    const float base = 1000.0f / cps;
-    n = 0;
-    uint32_t t = TYPE_START_MS;
-    for (int i = 0; i < len; i++) {
-      if (i == typoAt) {
-        ev[n++] = Event{t, TYPE, neighbourKey(text[i], rng)};
-        int extra = (i + 1 < len && isLetter(text[i + 1]) && (rng.next() & 1)) ? 1 : 0;
-        if (extra) { t += (uint32_t)(base * (0.7f + 0.4f * rng.unit())); ev[n++] = Event{t, TYPE, text[i + 1]}; }
-        t += 520 + rng.range(0, 260);                  // the "oops" pause
-        for (int k = 0; k <= extra; k++) { ev[n++] = Event{t, BACK, 0}; t += 170 + rng.range(0, 60); }
-        t += 160;
-      }
-      ev[n++] = Event{t, TYPE, text[i]};
-      float k = 0.65f + 0.7f * rng.unit();             // human jitter
-      if (text[i] == ' ') k *= 0.8f;                   // the space bar comes quickly...
-      if (i > 0 && text[i - 1] == ' ') k += 0.35f;     // ...the first letter of a word less so
-      t += (uint32_t)(base * k);
-    }
-    typedAt = n ? ev[n - 1].t : TYPE_START_MS;
-    t = typedAt + HOLD_MS;
-    for (int i = 0; i < len && n < MAX_EVENTS; i++) { ev[n++] = Event{t, BACK, 0}; t += REWIND_MS; }
-    emptyAt = n ? ev[n - 1].t : t;
-    cursorOutAt = emptyAt + AFTER_EMPTY_MS;
-    fadeInAt = cursorOutAt + BLACK_MS;
+    width = 0;
+    for (int i = 0; i < len; i++) width += advance(text[i]);
+    if (width > 0) width -= showfont::GAP;
+    pxPerMs = (pxPerS < 1 ? 1 : pxPerS) / 1000.0f;
+    scrolledAt = SCROLL_AT_MS + (uint32_t)(distance() / pxPerMs + 0.5f);
+    fadeInAt = scrolledAt + BLACK_MS;
     endAt = fadeInAt + FADE_IN_MS;
   }
-};
 
-// The line as it stands at time t, and where the view has glided to.
-struct LineState {
-  char line[MAX_CHARS + 2];
-  int len;
-  int cursorX;        // text x of the cursor's left edge
-  float view;         // text x shown at column LEFT
-  uint32_t lastKey;   // time of the last event (or the cursor's arrival)
-};
+  // One copy and the gap after it.
+  int period() const { return width + REPEAT_GAP; }
+  // Every copy, the gaps between them included.
+  int stripWidth() const { return repeats * width + (repeats - 1) * REPEAT_GAP; }
+  // From the first column just inside the dark seam to the last one just past v = 0.
+  float distance() const { return (float)(DARK_FROM + stripWidth()); }
 
-inline float viewTarget(int cursorX) {
-  float v = (float)(cursorX + CURSOR_W - 1 - (CURSOR_RIGHT - LEFT));
-  return v > 0 ? v : 0;
-}
-
-inline void lineAt(const Typing &ty, uint32_t t, LineState &s) {
-  s.len = 0; s.cursorX = 0; s.view = 0; s.lastKey = CURSOR_IN_MS;
-  float target = 0;
-  uint32_t prev = 0;
-  for (int i = 0; i < ty.n && ty.ev[i].t <= t; i++) {
-    const Event &e = ty.ev[i];
-    float tau = e.kind == BACK && i > 0 && ty.ev[i - 1].kind == BACK && e.t - ty.ev[i - 1].t < 100 ? 45.0f : 55.0f;
-    s.view = target + (s.view - target) * expf(-(float)(e.t - prev) / tau);
-    prev = e.t;
-    if (e.kind == TYPE) {
-      if (s.len < MAX_CHARS + 1) { s.line[s.len++] = e.c; s.cursorX += advance(e.c); }
-    } else if (s.len > 0) {
-      s.len--; s.cursorX -= advance(s.line[s.len]);
-    }
-    s.lastKey = e.t;
-    target = viewTarget(s.cursorX);
+  // The strip column shown at line column v = 0, in whole columns: -DARK_FROM
+  // at the start (the text waits just inside the dark), stripWidth() at the end.
+  int offset(uint32_t t) const {
+    float o = t <= SCROLL_AT_MS ? 0 : (float)(t - SCROLL_AT_MS) * pxPerMs;
+    if (o > distance()) o = distance();
+    return (int)lroundf(o) - DARK_FROM;
   }
-  s.line[s.len] = 0;
-  s.view = target + (s.view - target) * expf(-(float)(t - prev) / 55.0f);
-  // Two quick keys can leave the glide a whole letter behind; never let the
-  // cursor run more than MAX_LAG columns past its spot (or the line that far
-  // past its start when backspacing).
-  if (s.view < target - MAX_LAG) s.view = target - MAX_LAG;
-  if (s.view > target + MAX_LAG) s.view = target + MAX_LAG;
-}
+};
 
-inline bool cursorOn(const Typing &ty, const LineState &s, uint32_t t) {
-  if (t < CURSOR_IN_MS || t >= ty.cursorOutAt) return false;
-  if (t < TYPE_START_MS) return ((t - CURSOR_IN_MS) / BLINK_MS) % 2 == 0;
-  uint32_t since = t - s.lastKey;
-  if (since < SOLID_MS) return true;
-  return ((since - SOLID_MS) / BLINK_MS) % 2 == 1;   // off first, then on...
-}
-
-// Is text column x (cursor included), row y (0..9) lit?
-inline bool lineLit(const LineState &s, bool cursor, int x, int y) {
-  if (cursor && x >= s.cursorX && x < s.cursorX + CURSOR_W) return true;
-  if (x < 0 || x >= s.cursorX) return false;
+// Is strip column x, row y (0..PH-1) of the message lit? The plain per-pixel
+// lookup; the renderer builds whole columns at once and is tested against it.
+inline bool messageLit(const Message &m, int x, int y) {
+  if (x < 0 || x >= m.stripWidth()) return false;
+  x %= m.period();
+  if (x >= m.width) return false;
   int x0 = 0;
-  for (int i = 0; i < s.len; i++) {
-    const showfont::Glyph *g = showfont::find(s.line[i]);
+  for (int i = 0; i < m.len; i++) {
+    const showfont::Glyph *g = showfont::find(PHRASE_FONT, m.text[i]);
     int w = showfont::width(g);
     if (x < x0 + w) return showfont::lit(g, x - x0, y);
     x0 += w + showfont::GAP;
@@ -278,7 +191,8 @@ const uint32_t SPIN_UP_MS = 1500, SPIN_DOWN_MS = 1700, LOCK_MS = 450;
 
 struct Ticker {
   TickCol col[TICK_MAX];
-  int len;              // ticker columns between the two copies of the faces
+  int len;              // ticker columns between the two copies of the faces (0: none)
+  int laps;
   float pxPerS;
   uint32_t cruiseMs, endAt;
 
@@ -289,12 +203,12 @@ struct Ticker {
   int gap(int n, int w) { for (int i = 0; i < w; i++) n = put(n, 0, K_BLANK, 0); return n; }
   int bigText(int n, const char *s, uint8_t kind, uint8_t person) {
     for (int i = 0; s[i]; i++) {
-      const showfont::Glyph *g = showfont::find(s[i]);
+      const showfont::Glyph *g = showfont::find(showfont::BOLD, s[i]);
       if (!g) continue;
       if (i) n = gap(n, showfont::GAP);
       for (int x = 0; x < showfont::width(g); x++) {
         uint16_t b = 0;
-        for (int y = 0; y < showfont::H; y++)
+        for (int y = 0; y < showfont::BOLD.h; y++)
           if (showfont::lit(g, x, y)) b |= (uint16_t)(1u << (TEXT_Y + y));
         n = put(n, b, kind, person);
       }
@@ -325,10 +239,13 @@ struct Ticker {
     return n;
   }
 
-  void build(const People &p, float pxPerS_) {
+  // numbers: the heart / BPM / arrow ticker between the faces, or just the
+  // faces going round. laps: full turns of the faces after the ticker.
+  void build(const People &p, float pxPerS_, bool numbers = true, int laps_ = 1) {
     pxPerS = pxPerS_ < 5 ? 5 : pxPerS_;
-    int n = gap(0, TICK_LEAD);
-    int reps = 2;
+    laps = laps_ < 1 ? 1 : laps_;
+    int n = numbers ? gap(0, TICK_LEAD) : 0;
+    int reps = numbers ? 2 : 0;
     for (int r = 0; r < reps; r++)
       for (int i = 0; i < p.count && i < 2; i++) {
         n = bigText(n, "#", K_HEART, (uint8_t)i);
@@ -358,14 +275,14 @@ struct Ticker {
     len = n < TICK_MAX ? n : TICK_MAX;
     // Distance: the ticker plus one lap of the faces. Half of the speed-up
     // and slow-down time counts as travel at full speed.
-    float dist = (float)(COLS + len);
+    float dist = distance();
     float rampPx = pxPerS * (SPIN_UP_MS + SPIN_DOWN_MS) / 2000.0f;
     float cruise = dist > rampPx ? (dist - rampPx) / pxPerS * 1000.0f : 0;
     cruiseMs = (uint32_t)cruise;
     endAt = SPIN_UP_MS + cruiseMs + SPIN_DOWN_MS + LOCK_MS;
   }
 
-  float distance() const { return (float)(COLS + len); }
+  float distance() const { return (float)(COLS * laps + len); }
 
   // How far the ring has turned at t, in columns (fractional).
   float offset(uint32_t t) const {
@@ -398,20 +315,32 @@ enum Kind : uint8_t { NONE = 0, TICKER = 1, PHRASE = 2 };
 
 struct Player {
   Kind kind = NONE;
-  Typing typing;
+  Message message;
   Ticker ticker;
   Rgb textRgb = {255, 255, 255};
 
-  void startPhrase(const char *phrase, uint32_t seed, float cps, bool typo, Rgb text) {
+  void startPhrase(const char *phrase, float pxPerS, Rgb text, int repeats = 1) {
     kind = PHRASE; textRgb = text;
-    typing.build(phrase, seed, cps, typo);
+    message.build(phrase, pxPerS, repeats);
   }
-  void startTicker(const People &p, float pxPerS) {
+  void startTicker(const People &p, float pxPerS, bool numbers = true, int laps = 1) {
     kind = TICKER;
-    ticker.build(p, pxPerS);
+    ticker.build(p, pxPerS, numbers, laps);
+  }
+  // How far into the show a brightness scan needs to look. The ticker: all of
+  // it. A message: once there's text all along the line, the picture repeats
+  // every period(), and before and after that it's the same picture with
+  // copies missing, so the first period plus a line's width covers every frame.
+  uint32_t scanEnd() const {
+    if (kind != PHRASE) return duration();
+    const Message &m = message;
+    int o = m.period() + SPAN;
+    if (o > m.stripWidth()) o = m.stripWidth();
+    uint32_t t = SCROLL_AT_MS + (uint32_t)((DARK_FROM + o) / m.pxPerMs) + 1;
+    return t < m.endAt ? t : m.endAt;
   }
   uint32_t duration() const {
-    return kind == PHRASE ? typing.endAt : kind == TICKER ? ticker.endAt : 0;
+    return kind == PHRASE ? message.endAt : kind == TICKER ? ticker.endAt : 0;
   }
 
   // Draws the show at t ms into out. normal is the heart rate display as the
@@ -428,58 +357,46 @@ struct Player {
   }
 
   float renderPhrase(uint32_t t, const Frame &normal, Frame &out) const {
-    const Typing &ty = typing;
+    const Message &m = message;
     if (t < FADE_OUT_MS) {
       float k = 1.0f - (float)t / FADE_OUT_MS;
       for (int y = 0; y < ROWS; y++)
         for (int x = 0; x < COLS; x++) out[y][x] = scale(normal[y][x], k * k);
       return 0;
     }
-    if (t >= ty.fadeInAt) {
-      float k = (float)(t - ty.fadeInAt) / FADE_IN_MS;
+    if (t >= m.fadeInAt) {
+      float k = (float)(t - m.fadeInAt) / FADE_IN_MS;
       for (int y = 0; y < ROWS; y++)
         for (int x = 0; x < COLS; x++) out[y][x] = scale(normal[y][x], k * k);
       return 0;
     }
-    LineState s;
-    lineAt(ty, t, s);
-    bool cur = cursorOn(ty, s, t);
-    // Both halves show the same 32 columns. Column c shows text x = c - LEFT +
-    // view; a fractional view blends neighbouring columns so the glide is smooth.
-    float fv = s.view;
-    int vi = (int)floorf(fv);
-    float f = fv - vi;
-    // The lit rows of text columns x0 .. x0 + HALF, built once per frame
-    // (looking each glyph up per pixel was too slow on the board).
-    const int x0 = vi - LEFT;
-    uint16_t bits[HALF + 1];
-    for (int k = 0; k <= HALF; k++) bits[k] = 0;
-    int gx = 0;
-    for (int i = 0; i < s.len && gx <= x0 + HALF; i++) {
-      const showfont::Glyph *g = showfont::find(s.line[i]);
-      int w = showfont::width(g);
-      for (int cx = 0; cx < w; cx++) {
-        int k = gx + cx - x0;
-        if (k < 0 || k > HALF) continue;
-        for (int y = 0; y < showfont::H; y++)
-          if (showfont::lit(g, cx, y)) bits[k] |= (uint16_t)(1u << y);
+    // Line column v shows text column v + off. The lit rows of each line
+    // column, built once per frame (looking each glyph up per pixel was too
+    // slow on the board).
+    const int off = m.offset(t);
+    uint16_t bits[SPAN];
+    for (int k = 0; k < SPAN; k++) bits[k] = 0;
+    for (int rep = 0; rep < m.repeats; rep++) {
+      int gx = rep * m.period();
+      if (gx + m.width - off < 0 || gx - off >= SPAN) continue;   // this copy is off the line
+      for (int i = 0; i < m.len && gx - off < SPAN; i++) {
+        const showfont::Glyph *g = showfont::find(PHRASE_FONT, m.text[i]);
+        int w = showfont::width(g);
+        for (int cx = 0; cx < w; cx++) {
+          int v = gx + cx - off;
+          if (v < 0 || v >= SPAN) continue;
+          for (int y = 0; y < PH; y++)
+            if (showfont::lit(g, cx, y)) bits[v] |= (uint16_t)(1u << y);
+        }
+        gx += w + showfont::GAP;
       }
-      gx += w + showfont::GAP;
     }
-    if (cur)
-      for (int cx = 0; cx < CURSOR_W; cx++) {
-        int k = s.cursorX + cx - x0;
-        if (k >= 0 && k <= HALF) bits[k] = (uint16_t)((1u << showfont::H) - 1);
-      }
-    for (int c = 0; c < HALF; c++) {
-      float fade = c < FADE_COLS ? (float)(c + 1) / (FADE_COLS + 1) : 1.0f;
-      for (int y = 0; y < showfont::H; y++) {
-        float a = ((bits[c] >> y) & 1 ? 1.0f - f : 0) + ((bits[c + 1] >> y) & 1 ? f : 0);
-        a *= fade;
-        if (a <= 0.02f) continue;
-        Rgb px = scale(textRgb, a);
-        for (int h = 0; h < COLS / HALF; h++) out[TEXT_Y + y][h * HALF + c] = px;
-      }
+    for (int v = 0; v < SPAN; v++) {
+      float a = columnFade(v);
+      if (!bits[v] || a <= 0.02f) continue;
+      Rgb px = scale(textRgb, a);
+      for (int y = 0; y < PH; y++)
+        if ((bits[v] >> y) & 1) out[PHRASE_Y + y][(v + RING_AT_V0) % COLS] = px;
     }
     return 1;
   }
@@ -513,15 +430,11 @@ struct Player {
   }
 
   float renderTicker(uint32_t t, const Frame &normal, const People &p, Frame &out) const {
-    float o = ticker.offset(t);
-    int oi = (int)floorf(o);
-    float f = o - oi;
+    // Whole columns only, as for the text: a sub-pixel blend streaks.
+    const int oi = (int)lroundf(ticker.offset(t));
     for (int c = 0; c < COLS; c++)
-      for (int y = 0; y < ROWS; y++) {
-        int s = c + oi;
-        // The bump can swing a pixel past the end: wrap that into the faces.
-        out[y][c] = mixc(stripAt(s, y, normal, p), stripAt(s + 1, y, normal, p), f);
-      }
+      for (int y = 0; y < ROWS; y++)
+        out[y][c] = stripAt(c + oi, y, normal, p);   // the bump can swing past the end: that wraps into the faces
     uint32_t up = SPIN_UP_MS, down0 = SPIN_UP_MS + ticker.cruiseMs, lock = down0 + SPIN_DOWN_MS;
     if (t >= lock) {
       // The zone bars (row 0) flash white as it locks.
@@ -543,17 +456,17 @@ struct Player {
 // Test mode: every program in turn.
 inline int nextInOrder(int last, int count) { return count <= 0 ? -1 : (last + 1) % count; }
 
-// Festival mode: any program but the last one; the ticker only when your
-// heart rate is coming in. rnd is any random number.
-inline int pickNext(int last, int count, bool tickerOk, uint32_t rnd) {
-  int ok[32], n = 0;
-  for (int i = 0; i < count && n < 32; i++) {
-    if (i == 0 && !tickerOk) continue;
-    if (i == last) continue;
-    ok[n++] = i;
-  }
-  if (n == 0) return (last >= 0 && last < count && (last != 0 || tickerOk)) ? last : -1;
-  return ok[rnd % (uint32_t)n];
+// Festival mode: the spin and the phrases take turns, spin first, and each
+// phrase turn plays the one after the last phrase played, round and round.
+// last: the program played last (-1: none yet). lastPhrase: the last phrase
+// played, 1..count-1 (0: none yet). Without the spin (tickerOk false) it's
+// just the phrases in turn.
+inline int nextAlternating(int last, int lastPhrase, int count, bool tickerOk) {
+  const int phrases = count - 1;
+  if (tickerOk && (last != 0 || phrases <= 0)) return 0;
+  if (phrases <= 0) return -1;
+  int p = lastPhrase >= 1 && lastPhrase <= phrases ? lastPhrase : 0;   // 0..phrases-1 next
+  return 1 + p % phrases;
 }
 
 // One sample every SAMPLE_MS; the oldest is about 10 minutes back.

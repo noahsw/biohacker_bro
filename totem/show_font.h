@@ -1,30 +1,32 @@
 #pragma once
 
 // ============================================================================
-// SHOW FONT — bold all-caps, 10 px tall. Pure, no Arduino: tested under tests/
+// SHOW FONTS — all-caps. Pure, no Arduino: tested under tests/
 // ============================================================================
 //
-// For the typed messages and the heart rate ticker (show_layout.h). Modelled
-// on the heavy geometric sans Above and Beyond type on their screen: every
-// stroke 2 px, counters 2 px, a pointed A, V, M and W. Each pixel is a 10 mm
-// square behind the diffuser, so a letter stands 10 cm tall and 6 cm wide,
-// and a face holds about two and a half of them.
+// Two fonts (show_layout.h):
+//   BOLD   10 px tall, 2 px strokes: the heart rate ticker's heart and BPM.
+//   LIGHT  7 px tall, 1 px strokes: the scrolling messages. The bold one read as
+//          blobs behind the diffuser once whole words went past; a classic
+//          5x7 keeps the counters open. Each pixel is a 10 mm square, so a
+//          letter stands 7 cm tall and 5 cm wide.
 //
 // 'X' = lit. Every row of a glyph is the same width (checked by the tests).
-// Lowercase is drawn as uppercase. A character not here is skipped.
+// Lowercase is drawn as uppercase. A character not in a font is skipped.
 
 #include <stdint.h>
 #include <string.h>
 
 namespace showfont {
 
-const int H = 10;
+const int MAX_H = 10;
 const int GAP = 1;          // between letters
 
-struct Glyph { char c; const char *rows[H]; };
+struct Glyph { char c; const char *rows[MAX_H]; };   // rows past the font's height are null
+struct Font { const Glyph *glyphs; int count; int h; };
 
 // '#' is the ticker's heart.
-static const Glyph FONT[] = {
+static const Glyph BOLD_GLYPHS[] = {
   {' ', {"...", "...", "...", "...", "...", "...", "...", "...", "...", "..."}},
   {'A', {"..XXX..", "..XXX..", ".XXXXX.", ".XX.XX.", ".XX.XX.", "XX...XX", "XXXXXXX", "XXXXXXX", "XX...XX", "XX...XX"}},
   {'B', {"XXXXX.", "XXXXXX", "XX..XX", "XX..XX", "XXXXX.", "XXXXXX", "XX..XX", "XX..XX", "XXXXXX", "XXXXX."}},
@@ -71,22 +73,71 @@ static const Glyph FONT[] = {
   {'&', {".XXX..", "XX.XX.", "XX.XX.", ".XXX..", ".XXX.X", "XX.XXX", "XX..XX", "XX.XXX", "XXXXXX", ".XXX.X"}},
   {'#', {".........", ".XXX.XXX.", "XXXXXXXXX", "XXXXXXXXX", "XXXXXXXXX", ".XXXXXXX.", "..XXXXX..", "...XXX...", "....X....", "........."}},
 };
-const int FONT_LEN = sizeof(FONT) / sizeof(FONT[0]);
+
+static const Glyph LIGHT_GLYPHS[] = {
+  {' ', {"...", "...", "...", "...", "...", "...", "..."}},
+  {'A', {".XXX.", "X...X", "X...X", "XXXXX", "X...X", "X...X", "X...X"}},
+  {'B', {"XXXX.", "X...X", "X...X", "XXXX.", "X...X", "X...X", "XXXX."}},
+  {'C', {".XXX.", "X...X", "X....", "X....", "X....", "X...X", ".XXX."}},
+  {'D', {"XXXX.", "X...X", "X...X", "X...X", "X...X", "X...X", "XXXX."}},
+  {'E', {"XXXXX", "X....", "X....", "XXXX.", "X....", "X....", "XXXXX"}},
+  {'F', {"XXXXX", "X....", "X....", "XXXX.", "X....", "X....", "X...."}},
+  {'G', {".XXX.", "X...X", "X....", "X.XXX", "X...X", "X...X", ".XXXX"}},
+  {'H', {"X...X", "X...X", "X...X", "XXXXX", "X...X", "X...X", "X...X"}},
+  {'I', {"XXX", ".X.", ".X.", ".X.", ".X.", ".X.", "XXX"}},
+  {'J', {"..XXX", "...X.", "...X.", "...X.", "...X.", "X..X.", ".XX.."}},
+  {'K', {"X...X", "X..X.", "X.X..", "XX...", "X.X..", "X..X.", "X...X"}},
+  {'L', {"X....", "X....", "X....", "X....", "X....", "X....", "XXXXX"}},
+  {'M', {"X...X", "XX.XX", "X.X.X", "X.X.X", "X...X", "X...X", "X...X"}},
+  {'N', {"X...X", "X...X", "XX..X", "X.X.X", "X..XX", "X...X", "X...X"}},
+  {'O', {".XXX.", "X...X", "X...X", "X...X", "X...X", "X...X", ".XXX."}},
+  {'P', {"XXXX.", "X...X", "X...X", "XXXX.", "X....", "X....", "X...."}},
+  {'Q', {".XXX.", "X...X", "X...X", "X...X", "X.X.X", "X..X.", ".XX.X"}},
+  {'R', {"XXXX.", "X...X", "X...X", "XXXX.", "X.X..", "X..X.", "X...X"}},
+  {'S', {".XXXX", "X....", "X....", ".XXX.", "....X", "....X", "XXXX."}},
+  {'T', {"XXXXX", "..X..", "..X..", "..X..", "..X..", "..X..", "..X.."}},
+  {'U', {"X...X", "X...X", "X...X", "X...X", "X...X", "X...X", ".XXX."}},
+  {'V', {"X...X", "X...X", "X...X", "X...X", "X...X", ".X.X.", "..X.."}},
+  {'W', {"X...X", "X...X", "X...X", "X.X.X", "X.X.X", "X.X.X", ".X.X."}},
+  {'X', {"X...X", "X...X", ".X.X.", "..X..", ".X.X.", "X...X", "X...X"}},
+  {'Y', {"X...X", "X...X", ".X.X.", "..X..", "..X..", "..X..", "..X.."}},
+  {'Z', {"XXXXX", "....X", "...X.", "..X..", ".X...", "X....", "XXXXX"}},
+  {'0', {".XXX.", "X...X", "X..XX", "X.X.X", "XX..X", "X...X", ".XXX."}},
+  {'1', {"..X..", ".XX..", "..X..", "..X..", "..X..", "..X..", ".XXX."}},
+  {'2', {".XXX.", "X...X", "....X", "...X.", "..X..", ".X...", "XXXXX"}},
+  {'3', {"XXXXX", "...X.", "..X..", "...X.", "....X", "X...X", ".XXX."}},
+  {'4', {"...X.", "..XX.", ".X.X.", "X..X.", "XXXXX", "...X.", "...X."}},
+  {'5', {"XXXXX", "X....", "XXXX.", "....X", "....X", "X...X", ".XXX."}},
+  {'6', {"..XX.", ".X...", "X....", "XXXX.", "X...X", "X...X", ".XXX."}},
+  {'7', {"XXXXX", "....X", "...X.", "..X..", ".X...", ".X...", ".X..."}},
+  {'8', {".XXX.", "X...X", "X...X", ".XXX.", "X...X", "X...X", ".XXX."}},
+  {'9', {".XXX.", "X...X", "X...X", ".XXXX", "....X", "...X.", ".XX.."}},
+  {'-', {"...", "...", "...", "XXX", "...", "...", "..."}},
+  {'\'', {"X", "X", ".", ".", ".", ".", "."}},
+  {'!', {"X", "X", "X", "X", "X", ".", "X"}},
+  {'.', {".", ".", ".", ".", ".", ".", "X"}},
+  {',', {"..", "..", "..", "..", "..", ".X", "X."}},
+  {'?', {".XXX.", "X...X", "....X", "...X.", "..X..", ".....", "..X.."}},
+  {'&', {".XX..", "X..X.", "X.X..", ".X...", "X.X.X", "X..X.", ".XX.X"}},
+};
+
+const Font BOLD = {BOLD_GLYPHS, (int)(sizeof(BOLD_GLYPHS) / sizeof(BOLD_GLYPHS[0])), 10};
+const Font LIGHT = {LIGHT_GLYPHS, (int)(sizeof(LIGHT_GLYPHS) / sizeof(LIGHT_GLYPHS[0])), 7};
 
 inline char upper(char c) { return (c >= 'a' && c <= 'z') ? (char)(c - 'a' + 'A') : c; }
 
 // The glyph for c, or nullptr if the font doesn't have it. Callers uppercase
 // text first (upper()).
-inline const Glyph *find(char c) {
-  for (int i = 0; i < FONT_LEN; i++)
-    if (FONT[i].c == c) return &FONT[i];
+inline const Glyph *find(const Font &f, char c) {
+  for (int i = 0; i < f.count; i++)
+    if (f.glyphs[i].c == c) return &f.glyphs[i];
   return nullptr;
 }
 
 inline int width(const Glyph *g) { return g ? (int)strlen(g->rows[0]) : 0; }
 
 inline bool lit(const Glyph *g, int x, int y) {
-  if (!g || y < 0 || y >= H || x < 0 || x >= width(g)) return false;
+  if (!g || y < 0 || y >= MAX_H || !g->rows[y] || x < 0 || x >= width(g)) return false;
   return g->rows[y][x] == 'X';
 }
 

@@ -13,12 +13,14 @@
   on their beats; bar, number and colours otherwise the same as yours. If your
   Whoop drops out while a friend is live, all four faces show the friend.
 
-  SHOWS (faces layout): every 10 minutes the heart rate steps aside for one
-  short show, never the same one twice running (show_layout.h):
-    - ticker spin: the faces spin round the ring and a stock ticker of your
-      and your friend's heart rates races past, then the faces lock back in
-    - typed messages: a phrase typed out letter by letter Above and Beyond
-      style, typo and backspace included
+  SHOWS (faces layout): every 5 minutes the heart rate steps aside for one
+  show, the spin and the messages taking turns, the messages in order
+  (show_layout.h):
+    - spin: the faces spin round the ring a couple of times, then lock back in
+      (SHOW_TICKER_NUMBERS 1 adds a stock ticker of your and your friend's
+      heart rates racing past)
+    - messages: a phrase scrolls round the ring three times, fading in and
+      out of a dark seam on one panel
   SHOW_TEST_MODE plays them back to back; SHOWS_ENABLED 0 turns them off.
 
   RING (TOTEM_RING 1, kept for later): three 16x16 panels as one 48x16 ring. Top: an EKG
@@ -455,7 +457,7 @@ static void drawOrientationTest() {
 }
 
 // ---------------------------------------------------------------------------
-// Shows: the ticker spin and the typed messages (show_layout.h)
+// Shows: the spin and the scrolling messages (show_layout.h)
 // ---------------------------------------------------------------------------
 #if SHOWS_ENABLED && !TOTEM_RING
 static_assert(RING_COLS == show::COLS, "shows are laid out for four 16x16 panels");
@@ -468,6 +470,7 @@ static show::HrHistory hrHist[1 + CREW_MAX];   // 0 = you, 1.. = crew slots
 static bool showRunning = false;
 static unsigned long showStart = 0, showNextAt = 0, hrHistAt = 0;
 static int showLast = -1;
+static int showLastPhrase = 0;     // 1.. : the last phrase played, so the next turn plays the one after
 static uint8_t showBright = 255;   // the show's brightness, from its brightest frame
 static int showFriend = -1;        // the friend in this show's ticker
 
@@ -540,31 +543,38 @@ static void scheduleNextShow() {
   showNextAt = millis() + (SHOW_TEST_MODE ? SHOW_TEST_GAP_S * 1000UL : SHOW_EVERY_MIN * 60000UL);
 }
 
-// Starts the next show and works out its brightness: the dimmest that any of
-// its frames needs to stay under LED_MAX_MA, so the whole show runs at one
-// steady level instead of pumping as letters come and go.
-static bool startNextShow() {
-  bool tickerOk = SHOW_TICKER && (SHOW_TEST_MODE || (hrConnected && currentBPM > 0));
-  int prog;
-  if (SHOW_TEST_MODE) {
-    prog = show::nextInOrder(showLast, SHOW_PROGRAMS);
-    if (prog == 0 && !SHOW_TICKER) prog = show::nextInOrder(prog, SHOW_PROGRAMS);
-    if (prog == 0 && !SHOW_TICKER) prog = -1;
-  } else {
-    prog = show::pickNext(showLast, SHOW_PROGRAMS, tickerOk, esp_random());
-  }
-  if (prog < 0) return false;
+// The show's brightness: the dimmest that any of its frames needs to stay
+// under LED_MAX_MA, so the whole show runs at one steady level instead of
+// pumping as letters come and go. Worked out a few milliseconds per frame over
+// the show's first second or so (doing it all at once froze the display for
+// up to 0.3 s on the longest phrase): it looks for the brightest frame by
+// summing its channels, then runs FastLED's power estimate on that one alone.
+// A show is one colour (the text) or the same faces shifted round (the spin),
+// so the biggest sum is the frame that needs the lowest brightness. Until it's
+// done the show runs at the heart rate's brightness, which is right for the
+// spin (the same faces) and near enough for a phrase (black, then its first
+// letters dim in the seam's fade; the scan only needs the first pass and a
+// bit, Player::scanEnd(), and takes well under a second).
+static const uint32_t SHOW_SCAN_BUDGET_MS = 6;   // per frame (of ~33)
+static bool showScanning = false;
+static uint32_t showScanT = 0, showScanBestSum = 0, showScanBestT = 0, showScanMs = 0;
+static bool showScanAny = false;
+static show::People showScanPeople;
 
-  showFriend = CREW_FACES ? liveFriend() : -1;
-  show::People p;
-  fillPeople(p, true);
-  if (prog == 0) {
-    showPlayer.startTicker(p, SHOW_TICKER_PX_PER_S);
-  } else {
-    showPlayer.startPhrase(SHOW_PHRASE_LIST[prog - 1], esp_random(), SHOW_TYPING_LETTERS_PER_S,
-                           SHOW_TYPOS, show::rgb(SHOW_TEXT_RGB));
+static void scanShowBrightness() {
+  if (!showScanning) return;
+  const uint32_t start = millis();
+  while (showScanT < showPlayer.scanEnd() && millis() - start < SHOW_SCAN_BUDGET_MS) {
+    uint32_t t = showScanT;
+    showScanT += 80;
+    if (showPlayer.render(t, showNormal, showScanPeople, showFrame) <= 0) continue;
+    uint32_t sum = 0;
+    for (int y = 0; y < show::ROWS; y++)
+      for (int x = 0; x < show::COLS; x++) sum += showFrame[y][x].r + showFrame[y][x].g + showFrame[y][x].b;
+    if (!showScanAny || sum > showScanBestSum) { showScanBestSum = sum; showScanBestT = t; showScanAny = true; }
   }
-
+  showScanMs += millis() - start;
+  if (showScanT < showPlayer.scanEnd()) return;
   // Same cap as limitBrightness(): the lower USB one while a computer is
   // plugged in, if this build has it (LED_MAX_MA_USB_HOST).
 #ifdef LED_MAX_MA_USB_HOST
@@ -572,20 +582,50 @@ static bool startNextShow() {
 #else
   const uint32_t capMw = (uint32_t)LED_MAX_MA * 5;
 #endif
-  drawNormalRing(true, showNormal);
   uint8_t b = wheelBrightness;
-  for (uint32_t t = 0; t < showPlayer.duration(); t += 80) {
-    if (showPlayer.render(t, showNormal, p, showFrame) <= 0) continue;
+  if (showScanAny) {
+    showPlayer.render(showScanBestT, showNormal, showScanPeople, showFrame);
     blitShowFrame(showFrame);
-    uint8_t m = calculate_max_brightness_for_power_mW(leds, NUM_LEDS, wheelBrightness, capMw);
-    if (m < b) b = m;
+    b = calculate_max_brightness_for_power_mW(leds, NUM_LEDS, wheelBrightness, capMw);
   }
   showBright = b;
+  showScanning = false;
+  Serial.printf("show: brightness %d/%d, worked out in %lu ms over %lu ms\r\n", showBright, wheelBrightness,
+                (unsigned long)showScanMs, (unsigned long)(millis() - showStart));
+}
+
+// Starts the next show (its brightness follows, see scanShowBrightness()).
+static bool startNextShow() {
+  bool tickerOk = SHOW_TICKER && (SHOW_TEST_MODE || !SHOW_TICKER_NUMBERS || (hrConnected && currentBPM > 0));
+  int prog;
+  if (SHOW_TEST_MODE) {
+    prog = show::nextInOrder(showLast, SHOW_PROGRAMS);
+    if (prog == 0 && !SHOW_TICKER) prog = show::nextInOrder(prog, SHOW_PROGRAMS);
+    if (prog == 0 && !SHOW_TICKER) prog = -1;
+  } else {
+    prog = show::nextAlternating(showLast, showLastPhrase, SHOW_PROGRAMS, tickerOk);
+  }
+  if (prog < 0) return false;
+
+  showFriend = CREW_FACES ? liveFriend() : -1;
+  show::People p;
+  fillPeople(p, true);
+  if (prog == 0) {
+    showPlayer.startTicker(p, SHOW_TICKER_PX_PER_S, SHOW_TICKER_NUMBERS, SHOW_SPIN_LAPS);
+  } else {
+    showPlayer.startPhrase(SHOW_PHRASE_LIST[prog - 1], SHOW_SCROLL_PX_PER_S, show::rgb(SHOW_TEXT_RGB), SHOW_REPEATS);
+  }
+
+  showScanPeople = p;
+  showScanT = showScanBestSum = showScanBestT = showScanMs = 0;
+  showScanAny = false;
+  showScanning = true;
   showLast = prog;
+  if (prog > 0) showLastPhrase = prog;
   showRunning = true;
   showStart = millis();
-  Serial.printf("show: %s, %.1f s, brightness %d/%d\r\n", prog == 0 ? "ticker" : SHOW_PHRASE_LIST[prog - 1],
-                showPlayer.duration() / 1000.0f, showBright, wheelBrightness);
+  Serial.printf("show: %s, %.1f s\r\n", prog == 0 ? "ticker" : SHOW_PHRASE_LIST[prog - 1],
+                showPlayer.duration() / 1000.0f);
   return true;
 }
 
@@ -610,11 +650,13 @@ static bool showFrameDrawn() {
   blitShowFrame(showNormal);
   limitBrightness();
   uint8_t normalBright = FastLED.getBrightness();
+  scanShowBrightness();   // wants the hearts at their peak too; uses showFrame and leds as scratch
   drawNormalRing(false, showNormal);
 
   show::People p;
   fillPeople(p, false);
   float mix = showPlayer.render(t, showNormal, p, showFrame);
+  if (showScanning) mix = 0;   // not worked out yet: the heart rate's brightness
   blitShowFrame(showFrame);
   FastLED.setBrightness((uint8_t)(normalBright + (showBright - normalBright) * mix + 0.5f));
   return true;

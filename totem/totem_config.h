@@ -70,11 +70,13 @@
 #endif
 
 #ifndef RING_REVERSE
-#define RING_REVERSE     0   // 1: panel 0 is on the right of panel 1, not the left
+#define RING_REVERSE     1   // 1: panel 0 is on the right of panel 1, not the left (so on this totem: checked with the walking dot)
 #endif
 
 // 1 = draw the orientation test instead of the heart rate. See totem.ino.
+#ifndef TOTEM_ORIENTATION_TEST
 #define TOTEM_ORIENTATION_TEST 0
+#endif
 
 // --- 3. Power ---
 // The LEDs get their own cable from the power bank's USB-A port (5 V, 3 A).
@@ -182,13 +184,15 @@
 #define HEART_RGB_YOU    CRGB(255, 20, 20)
 #define HEART_RGB_FRIEND CRGB(0, 200, 255)
 
-// --- 7. Shows: something for the crowd every 10 minutes ---
-// Every SHOW_EVERY_MIN minutes the heart rate steps aside for one show, never
-// the same one twice in a row: the ticker spin (your and your friend's heart
+// --- 7. Shows: something for the crowd every 5 minutes ---
+// Every SHOW_EVERY_MIN minutes the heart rate steps aside for one show. The
+// spin and the phrases take turns (spin, phrase 1, spin, phrase 2, ... and
+// round again), so each comes every 10 minutes: the ticker spin (your and your friend's heart
 // rates race round the ring like a stock ticker, with a green or red arrow
-// for how far each moved in the last 10 minutes) or one of the phrases below
-// typed out Above and Beyond style, typo and backspace included. A show runs
-// about 15 to 20 seconds. The ticker only plays while your Whoop is sending.
+// for how far each moved in the last 10 minutes, or with SHOW_TICKER_NUMBERS 0
+// just the faces spinning round) or one of the phrases below scrolling round
+// the ring. The spin takes about 8 seconds, a phrase about 1 to 2 minutes.
+// With numbers, the ticker only plays while your Whoop is sending.
 // Four-panel faces layout only. See show_layout.h.
 #ifndef SHOWS_ENABLED
 #define SHOWS_ENABLED 1        // 0 = all off: heart rate only, as before
@@ -196,19 +200,24 @@
 #ifndef SHOW_TEST_MODE
 #define SHOW_TEST_MODE 0       // 1 = every show back to back (ticker, then each phrase), to try them out
 #endif
-#define SHOW_EVERY_MIN 10      // minutes between shows (the first is this long after power-on)
+#define SHOW_EVERY_MIN 5       // minutes between shows (the first, a spin, is this long after power-on)
 #define SHOW_TEST_GAP_S 4      // test mode: seconds of heart rate between shows
 
 #define SHOW_TICKER 1          // 0 = phrases only
-#define SHOW_TICKER_PX_PER_S 22   // how fast the ticker passes; a number takes ~2 s to cross a face
+#define SHOW_TICKER_NUMBERS 0  // 1 = big heart, BPM and arrows race round between the faces; 0 = just the faces spin
+#define SHOW_SPIN_LAPS 2       // full turns of the faces
+#define SHOW_TICKER_PX_PER_S 22   // spin speed at full tilt, columns a second (a face is 16)
 
 // The phrases, in quotes, a comma after each but the last. Capitals or not,
-// they're typed in capitals. Up to 60 characters each; letters, digits and
+// they're shown in capitals. Up to 60 characters each; letters, digits and
 // ' ! . , ? & - work.
 #define SHOW_PHRASES \
-  "WE ARE ALL WE NEED", \
+  "WE'RE ALL WE NEED", \
   "LIFE IS MADE OF SMALL MOMENTS LIKE THESE", \
-  "ALWAYS CHOOSE ADVENTURE"
-#define SHOW_TYPING_LETTERS_PER_S 3.5f   // average typing speed
-#define SHOW_TYPOS 1           // 1 = one typo per phrase, backspaced and fixed; 0 = none
-#define SHOW_TEXT_RGB 255, 255, 255      // text and cursor colour (white, like their screen)
+  "ALWAYS CHOOSE ADVENTURE", \
+  "GLAD YOU'RE HERE", \
+  "YOU ARE SOMEBODY'S FAVORITE MEMORY", \
+  "MAIN CHARACTER ENERGY"
+#define SHOW_SCROLL_PX_PER_S 6.0f   // scroll speed, columns a second (a letter is about 6)
+#define SHOW_REPEATS 3         // times each phrase comes round, a panel's width apart
+#define SHOW_TEXT_RGB 255, 255, 255      // text colour

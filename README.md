@@ -329,26 +329,26 @@ carries no power, so moving it to another pin can't damage anything.
 
 ### Totem shows (`totem/show_layout.h`)
 
-Every 10 minutes the totem's heart rate steps aside for one show, about 15 to
-20 seconds, never the same one twice in a row:
+Every 5 minutes the totem's heart rate steps aside for one show. The spin and
+the messages take turns, so each comes round every 10 minutes, and each message
+turn plays the next phrase in `SHOW_PHRASES`:
 
-- **Ticker spin:** the faces spin round the ring, a stock ticker of your and
-  your friend's heart rates races past (heart, BPM in its zone colour, green or
-  red arrow with the change over the last 10 minutes), then the faces lock back
-  in and the zone bars flash.
-- **Typed messages:** the phrases in `SHOW_PHRASES` typed out Above and Beyond
-  style: cursor blinking on a black screen, a letter at a time with one typo
-  backspaced and fixed, then the line rewinds away. Two cursors on opposite
-  sides of the ring, so half the crowd sees the letters land and everyone sees
-  the words slide past in order.
+- **Spin:** the four faces spin round the ring twice (about 8 seconds), then
+  bump into place and the zone bars flash. `SHOW_TICKER_NUMBERS 1` adds a stock
+  ticker of your and your friend's heart rates racing past between them.
+- **Messages:** the phrase scrolls the whole way round the ring three times in
+  thin 7 px capitals, at a steady 6 columns a second (1 to 2 minutes). One
+  panel is the seam: the letters fade in out of one side of it, its middle
+  stays dark so the crowd can see where the line starts, and they fade out into
+  its other side.
 
 Settings are section 7 of `totem/totem_config.h`. `SHOW_TEST_MODE 1` plays
 every show back to back with 4 seconds of heart rate between, to check them
 before a night out; `SHOWS_ENABLED 0` turns them off. Each show runs at one
 steady brightness, worked out at its start from its brightest frame so it stays
-under `LED_MAX_MA`. The ticker needs `RING_REVERSE` right: if the faces jump
-between panels instead of flowing round, flip it (the orientation test's
-walking dot shows which way the chain runs). The layout and the font are
+under `LED_MAX_MA`. Both shows need `RING_REVERSE` right (it's 1 on this
+totem): if text or faces jump between panels instead of flowing round, flip it
+(the orientation test's walking dot shows which way the chain runs). The layout and the font are
 host-tested (`tests/test_show_layout.cpp`).
 
 ## Host-side tests
