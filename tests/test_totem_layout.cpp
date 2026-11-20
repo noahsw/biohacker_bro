@@ -60,6 +60,13 @@ int main() {
     for (int c = face::NARROW_W; c < face::DIGIT_W; c++)
       CHECK(face::GLYPH[face::GLYPH_NARROW_ONE][r][c] == '.', "narrow 1 spills into column %d", c);
   { int g[3]; CHECK(face::bpmGlyphs(128, g) == 3 && g[0] == face::GLYPH_NARROW_ONE && g[1] == 2 && g[2] == 8, "128 digits"); }
+  // Four faces side by side: the gap between two panels' numbers (16 - width)
+  // must be clearly wider than the gap between digits, or neighbours run together.
+  for (int bpm = 10; bpm <= 199; bpm++) {
+    int g[3], n = face::bpmGlyphs(bpm, g);
+    int seam = face::W - face::textWidth(g, n);
+    CHECK(seam >= 3 * face::DIGIT_GAP, "bpm %d leaves only %d px between panels", bpm, seam);
+  }
 
   // Zone bar on 16 px: slices tile the row exactly, fill never shrinks as BPM rises.
   CHECK(zoneSliceX(0, 16) == 0 && zoneSliceX(ZONE_COUNT, 16) == 16, "bar slices don't tile 16 px");
