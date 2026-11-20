@@ -7,7 +7,7 @@
 //   row  0       the zone bar: the chest display's legend, dim, lit in its own
 //                colours up to the current BPM (slices 3,3,3,3,4 px wide)
 //   row  1       gap, so the bar and the heart's lobes read as two things
-//   rows 2..7    the heart, 8x6 (cols 4..11), red, pulsing with each beat
+//   rows 2..7    the heart, 8x6 (cols 4..11), hot pink, pulsing with each beat
 //   row  8       gap
 //   rows 9..15   BPM, 5x7 digits, zone-coloured, centred
 //
@@ -91,7 +91,7 @@ inline bool heartEdgeAt(int x, int y) {
 
 // The zone bar's fill in whole pixels, from its exact value (0..16) and the
 // fill shown last frame. Plain rounding made a BPM wobbling by one across a
-// rounding point (62/63 on the default zones: 1.49 vs 1.71 px) flick the end
+// rounding point (e.g. 1.49 vs 1.71 px) flick the end
 // pixel on and off. So a one-pixel step waits until the value is
 // BAR_HOLD_PX past that point. Bigger jumps go straight through.
 const float BAR_HOLD_PX = 0.25f;
@@ -106,7 +106,7 @@ inline int barFill(float exact, int prev) {
 // The smallest channel value that's still lit after FastLED's global
 // brightness `b`. With dithering off, FastLED scales each channel as
 // v * (b + 1) >> 8, so anything under 256 / (b + 1) rounds to 0. That made
-// the bar's dim legend go blank: zone 0's unlit grey is ~10, and at the
+// the bar's dim legend go blank: an unlit legend pixel can be ~10, and at the
 // capped brightness of ~14 that comes out as 0.
 inline uint8_t visibleFloor(uint8_t b) { return (uint8_t)((256 + b) / (b + 1)); }   // ceil(256 / (b+1))
 

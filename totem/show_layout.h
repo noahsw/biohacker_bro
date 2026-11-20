@@ -25,7 +25,7 @@
 //   Optionally (numbers, off by default) a stock ticker comes round behind
 //   them first: a pulsing heart, the BPM in its zone colour, and a green up or
 //   red down arrow with how much it moved over the last 10 minutes. Yours
-//   (red heart), then your friend's (cyan), twice round.
+//   (hot pink heart), then your friend's (purple), twice round.
 //
 // QUEEN MARY
 //   The heart rate fades out, a night sea fades in, and a three-funnel liner
@@ -174,7 +174,7 @@ struct People {
   bool deltaKnown[2];
   int delta[2];         // BPM now minus 10 minutes ago (or as far back as known)
   Rgb zone[2];          // the BPM's zone colour
-  Rgb heart[2];         // red for you, cyan for your friend
+  Rgb heart[2];         // hot pink for you, purple for your friend
   float beat[2];        // heartbeat pulse 0..1, for the ticker's hearts
 };
 

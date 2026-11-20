@@ -16,8 +16,8 @@
 
 #include "config.h"
 
-// Zones are numbered 0..ZONE_COUNT-1 (Z4 covers "zone 4 and 5" together).
-const int ZONE_COUNT = 5;
+// Zones are numbered 0..ZONE_COUNT-1: white, yellow, orange, red.
+const int ZONE_COUNT = 4;
 
 // Lower bound of each zone in BPM, for zone 0..ZONE_COUNT. The last entry is
 // the ceiling of the top zone, so zoneFloorBpm(z)..zoneFloorBpm(z+1) is always
@@ -37,6 +37,6 @@ float barFraction(int bpm);
 
 // Left edge, in pixels, of zone `zone`'s slice of a bar `panelWidth` wide.
 // Derived rather than hardcoded so the width doesn't quietly round away:
-// 64/5 = 12.8px per zone, so slices come out 12 or 13 wide and still tile
-// the row exactly, with no gap and no overlap.
+// a width that doesn't divide by ZONE_COUNT still tiles the row exactly,
+// with no gap and no overlap.
 int zoneSliceX(int zone, int panelWidth);

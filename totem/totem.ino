@@ -9,7 +9,7 @@
   FACES (default): four 16x16 panels wrapped round the head, all four showing
   the same thing at once: the chest display's zone bar on top, a heart pulsing
   on your beats, and your BPM in the zone's colour. When a friend's strap is
-  connected (CREW_FACES), two opposite faces switch to them: a cyan heart beating
+  connected (CREW_FACES), two opposite faces switch to them: a purple heart beating
   on their beats; bar, number and colours otherwise the same as yours. If your
   Whoop drops out while a friend is live, all four faces show the friend.
 
@@ -156,11 +156,10 @@ static CRGB faceBuf[face::H][face::W];
 // The chest display's legend palette, for the bar.
 static CRGB zonePaletteRgb(int z) {
   switch (z) {
-    case 0:  return CRGB(45, 45, 45);
-    case 1:  return CRGB(140, 140, 140);
-    case 2:  return CRGB(0, 110, 255);
-    case 3:  return CRGB(255, 190, 0);
-    default: return CRGB(255, 30, 30);
+    case 0:  return CRGB(140, 140, 140);   // white, capped so it doesn't outshine yellow
+    case 1:  return CRGB(255, 190, 0);     // yellow
+    case 2:  return CRGB(255, 90, 0);      // orange
+    default: return CRGB(255, 30, 30);     // red
   }
 }
 
@@ -171,10 +170,16 @@ static CRGB zonePaletteRgb(int z) {
 static void drawZoneBar(int bpm, bool connected, bool peak, int &lastFill) {
   int fill = 0;
   if (connected && bpm > 0) {
-    fill = face::barFill(barFraction(bpm) * face::W, lastFill);
+    // +0.5 px: light the pixel you're IN rather than rounding to the nearest
+    // edge, so the white zone reads as 60s, 70s, 80s, 90s, one pixel each.
+    fill = face::barFill(barFraction(bpm) * face::W + 0.5f, lastFill);
+    if (fill > face::W) fill = face::W;
     if (fill < 1) fill = 1;   // always show something, as on the chest
   }
   if (!peak) lastFill = fill;
+  // The power-measuring frame lights the whole bar (see drawFace): measured on
+  // the real fill, every pixel step moved the brightness of everything.
+  if (peak) fill = face::W;
   bool blinkOff = !peak && (millis() / BAR_BLINK_MS) % 2;
   // Brightness this frame goes out at: limitBrightness() has already run for
   // the real frame. The peak frame sees last frame's, which is close enough.
@@ -198,10 +203,9 @@ static void drawZoneBar(int bpm, bool connected, bool peak, int &lastFill) {
 // Same zone colours as the chest display's BPM digits.
 static CRGB zoneRgb(int bpm) {
   switch (hrZone(bpm)) {
-    case 0:
-    case 1:  return CRGB(255, 255, 255);
-    case 2:  return CRGB(80, 165, 255);
-    case 3:  return CRGB(255, 205, 0);
+    case 0:  return CRGB(255, 255, 255);
+    case 1:  return CRGB(255, 205, 0);
+    case 2:  return CRGB(255, 100, 0);
     default: return CRGB(255, 30, 30);
   }
 }
@@ -211,8 +215,12 @@ static CRGB zoneRgb(int bpm) {
 // ---------------------------------------------------------------------------
 
 // peak: draw the brightest this frame can get (heart at the top of its beat or
-// breath, blinking pixel lit), for limitBrightness() to measure.
-// heartRgb: the heart's full-beat colour (red for you, cyan for your friend).
+// breath, the whole bar lit, the number as a white "188"), for
+// limitBrightness() to measure. Worst case rather than the real bar and digits
+// on purpose: measured on the real ones, going from 69 to 70 (different lit
+// pixel counts) moved the global brightness a step, and at the low levels the
+// cap holds it to that visibly shifted the dim legend's colours.
+// heartRgb: the heart's full-beat colour (hot pink for you, purple for your friend).
 // lastBeat: when that heart last beat, for the pulse and the ripple.
 // barFill: that person's bar position, kept between frames (see drawZoneBar).
 static void drawFace(int bpm, bool connected, bool peak, CRGB heartRgb,
@@ -234,8 +242,8 @@ static void drawFace(int bpm, bool connected, bool peak, CRGB heartRgb,
     for (int y = 0; y < face::H; y++)
       for (int x = 0; x < face::W; x++)
         if (face::heartAt(x, y)) faceBuf[y][x] = heart;
-    n = face::bpmGlyphs(bpm, glyphs);
-    textColor = zoneRgb(bpm);
+    n = face::bpmGlyphs(peak ? 188 : bpm, glyphs);
+    textColor = peak ? CRGB(255, 255, 255) : zoneRgb(bpm);
 
 #if RIPPLE_ENABLED
     unsigned long age = millis() - lastBeat;
@@ -420,7 +428,7 @@ static int liveFriend() {
   return -1;
 }
 
-// Opposite sides: faces 0 and 2 show you, 1 and 3 your friend (cyan heart).
+// Opposite sides: faces 0 and 2 show you, 1 and 3 your friend (purple heart).
 // Panels are chained round the ring in order, so even and odd faces sit
 // opposite each other. With no friend connected, all four show you.
 //
