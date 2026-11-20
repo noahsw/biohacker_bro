@@ -10,7 +10,8 @@
   the same thing at once: the chest display's zone bar on top, a heart pulsing
   on your beats, and your BPM in the zone's colour. When a friend's strap is
   connected (CREW_FACES), two opposite faces switch to them: a cyan heart beating
-  on their beats; bar, number and colours otherwise the same as yours.
+  on their beats; bar, number and colours otherwise the same as yours. If your
+  Whoop drops out while a friend is live, all four faces show the friend.
 
   RING (TOTEM_RING 1, kept for later): three 16x16 panels as one 48x16 ring. Top: an EKG
   trace that sweeps round the ring and spikes on every real heartbeat, in
@@ -393,10 +394,23 @@ static int liveFriend() {
 // Opposite sides: faces 0 and 2 show you, 1 and 3 your friend (cyan heart).
 // Panels are chained round the ring in order, so even and odd faces sit
 // opposite each other. With no friend connected, all four show you.
+//
+// If your Whoop drops out (taken off, out of range) while a friend's strap is
+// still live, all four faces show the friend instead of two idle hearts, so
+// the totem keeps going while you step away. This ignores CREW_FACES: it's
+// about not having dead faces, not about showing friends.
 static void drawAndBlitFaces(bool peak) {
   static int youFill = 0, friendFill = 0;
+  bool youLive = hrConnected && currentBPM > 0;
+  int fr = liveFriend();
+  if (!youLive && fr >= 0) {
+    if (!peak) advanceBeat(crew[fr].bpm, friendLastBeat, friendBeatCount);   // once per frame
+    drawFace(crew[fr].bpm, true, peak, HEART_RGB_FRIEND, friendLastBeat, friendFill);
+    blitAllFaces();
+    return;
+  }
   drawFace(currentBPM, hrConnected, peak, HEART_RGB_YOU, lastBeatTime, youFill);
-  int fr = CREW_FACES ? liveFriend() : -1;
+  if (!CREW_FACES) fr = -1;
   if (fr < 0) { friendLastBeat = millis(); blitAllFaces(); return; }
   for (int f = 0; f < FACE_COUNT; f += 2) blitFace(f);
   if (!peak) advanceBeat(crew[fr].bpm, friendLastBeat, friendBeatCount);   // once per frame
