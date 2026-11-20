@@ -174,34 +174,38 @@
 
 // --- Friend on the faces (FACES layout) ---
 // 1: when a friend's strap is connected, two opposite faces show them with a
-// cyan heart (everything else as for you), the other two show you with a red heart. 0: all four show you.
+// purple heart (everything else as for you), the other two show you with a hot pink heart. 0: all four show you.
+// Your heart is hot pink, not red, so it stays distinct from the red BPM digits
+// and bar when you're in the top zone.
 // Only the first connected friend is shown; the ring layout shows them all.
 // Either way, if your Whoop drops out while a friend is live, all four faces
 // show that friend.
 #ifndef CREW_FACES
 #define CREW_FACES 1
 #endif
-#define HEART_RGB_YOU    CRGB(255, 20, 20)
-#define HEART_RGB_FRIEND CRGB(0, 200, 255)
+#define HEART_RGB_YOU    CRGB(255, 30, 110)  // hot pink
+#define HEART_RGB_FRIEND CRGB(130, 0, 255)   // purple
 
 // --- 7. Shows: something for the crowd every 5 minutes ---
-// Every SHOW_EVERY_MIN minutes the heart rate steps aside for one show. The
-// spin and the phrases take turns (spin, phrase 1, spin, phrase 2, ... and
-// round again), so each comes every 10 minutes: the ticker spin (your and your friend's heart
+// Every SHOW_EVERY_MIN minutes the heart rate steps aside for one show. Three
+// turns go round (spin, phrase 1, Queen Mary, spin, phrase 2, Queen Mary, ...),
+// so each comes every 15 minutes: the ticker spin (your and your friend's heart
 // rates race round the ring like a stock ticker, with a green or red arrow
 // for how far each moved in the last 10 minutes, or with SHOW_TICKER_NUMBERS 0
 // just the faces spinning round) or one of the phrases below scrolling round
-// the ring. The spin takes about 8 seconds, a phrase about 1 to 2 minutes.
+// the ring, or the Queen Mary below. The spin takes about 8 seconds, a phrase
+// about 1 to 2 minutes.
 // With numbers, the ticker only plays while your Whoop is sending.
 // Four-panel faces layout only. See show_layout.h.
 #ifndef SHOWS_ENABLED
 #define SHOWS_ENABLED 1        // 0 = all off: heart rate only, as before
 #endif
 #ifndef SHOW_TEST_MODE
-#define SHOW_TEST_MODE 0       // 1 = every show back to back (ticker, then each phrase), to try them out
+#define SHOW_TEST_MODE 0       // 1 = every show back to back (ticker, each phrase, the ship), to try them out
 #endif
 #define SHOW_EVERY_MIN 5       // minutes between shows (the first, a spin, is this long after power-on)
 #define SHOW_TEST_GAP_S 4      // test mode: seconds of heart rate between shows
+#define SHOW_TEST_SHIP_ONLY 0  // test mode: 1 = just the ship, over and over, for debugging her
 
 #define SHOW_TICKER 1          // 0 = phrases only
 #define SHOW_TICKER_NUMBERS 0  // 1 = big heart, BPM and arrows race round between the faces; 0 = just the faces spin
@@ -217,12 +221,53 @@
   "ALWAYS CHOOSE ADVENTURE", \
   "GLAD YOU'RE HERE", \
   "YOU ARE SOMEBODY'S FAVORITE MEMORY", \
-  "MAIN CHARACTER ENERGY"
+  "MAIN CHARACTER ENERGY", \
+  "PUSH THE BUTTON", \
+  "HAPPY BIRTHDAY JACK", \
+  "ABOVE & BEYOND", \
+  "THIS IS GROUP THERAPY"
 #define SHOW_SCROLL_PX_PER_S 6.0f   // scroll speed, columns a second (a letter is about 6)
 #define SHOW_REPEATS 3         // times each phrase comes round, a panel's width apart
 #define SHOW_TEXT_RGB 255, 255, 255      // text colour
 
-// --- 8. Beat drop: the board's mics flash the ring on a drop ---
+// The Queen Mary: the night sea fades in, a three-funnel liner sails round
+// the ring under the stars with her wake behind her, then fades away.
+// About 53 s at 3 laps. She's the third turn, after a phrase. The phone
+// gives her a button of her own.
+#ifndef SHOW_SHIP
+#define SHOW_SHIP 1            // 0 = no ship
+#endif
+#define SHOW_SHIP_PX_PER_S 4.0f   // sailing speed, columns a second; 4 = one lap in 16 s
+#define SHOW_SHIP_LAPS 3       // times round the ring before she fades and the heart rate comes back
+
+// --- 8. Phone control (see phone_ble.h and docs/remote/) ---
+// Open the control page in the Bluefy browser on your iPhone, tap Connect,
+// pick "Totem" and type the PIN: then you can scroll your own text, play a
+// show now, pause the shows, set the brightness, turn the lights off and on
+// and see who's connected.
+//
+// Set your PIN in secrets.h (#define PHONE_PIN "4821"). Anyone with a
+// Bluetooth app can see the totem; the PIN is what stops them driving it.
+//
+// The phone takes one of NimBLE's connections: 3 by default, so you, one
+// friend and the phone. With a second friend in CREW_MAC_*, raise
+// MYNEWT_VAL_BLE_MAX_CONNECTIONS (section 6) or the phone and that friend
+// compete for the last slot.
+#ifndef PHONE_ENABLED
+#define PHONE_ENABLED 1
+#endif
+#ifndef PHONE_PIN
+#define PHONE_PIN "1234"
+#endif
+#define PHONE_NAME "Totem"
+#define PHONE_UNLOCK_S 20      // a phone that hasn't sent the PIN by then is disconnected
+// The page has the same UUIDs (docs/remote/index.html).
+#define PHONE_SERVICE_UUID "b10ac0de-0001-4e0f-8a5e-746f74656d21"
+#define PHONE_COMMAND_UUID "b10ac0de-0002-4e0f-8a5e-746f74656d21"
+#define PHONE_STATUS_UUID  "b10ac0de-0003-4e0f-8a5e-746f74656d21"
+#define PHONE_INFO_UUID    "b10ac0de-0004-4e0f-8a5e-746f74656d21"
+
+// --- 9. Beat drop: the board's mics flash the ring on a drop ---
 // The board's two mics listen to the bass. When it has been gone for a while
 // (a breakdown and build) and then slams back in, the ring gets a ~2.6 s burst
 // over whatever it's showing: one white flash, rainbow shock bands, then

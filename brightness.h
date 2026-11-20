@@ -30,6 +30,10 @@ void brightnessWait(unsigned long ms);
 // re-enumerates on reset — so these are reprinted from loop().
 uint8_t brightnessWheelAddr();
 int brightnessLevel();
+// Number of levels, and set one (1-based, clamped) as if the wheel had: shows
+// the level pips and saves it. For the totem's phone control.
+int brightnessLevelCount();
+void brightnessSetLevel(int level1);
 // Last raw byte read from the expander's input register, and how many reads
 // have failed since boot. Idle is 0x0F on the real board.
 uint8_t brightnessWheelRaw();

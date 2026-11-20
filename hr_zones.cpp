@@ -3,7 +3,7 @@
 namespace {
 
 const int zoneFloor[ZONE_COUNT + 1] = {
-  REST_BPM, ZONE1_BPM, ZONE2_BPM, ZONE3_BPM, ZONE4_BPM, ZONE_MAX_BPM
+  REST_BPM, ZONE1_BPM, ZONE2_BPM, ZONE3_BPM, ZONE_MAX_BPM
 };
 
 } // namespace
@@ -18,8 +18,7 @@ int hrZone(int bpm) {
   if (bpm < ZONE1_BPM) return 0;
   if (bpm < ZONE2_BPM) return 1;
   if (bpm < ZONE3_BPM) return 2;
-  if (bpm < ZONE4_BPM) return 3;
-  return 4;
+  return 3;
 }
 
 float barFraction(int bpm) {

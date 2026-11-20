@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b10">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Totem Remote</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='%23ff3b3b' d='M8 14 1.6 7.6a3.6 3.6 0 0 1 5.1-5.1L8 3.8l1.3-1.3a3.6 3.6 0 0 1 5.1 5.1Z'/%3E%3C/svg%3E">
+<!--
+  Phone remote for the festival totem (totem/phone_ble.h).
+
+  How it works: this page is plain HTML served from GitHub Pages. Once it's
+  loaded, the phone's browser talks to the totem directly over Bluetooth with
+  the Web Bluetooth API: nothing goes through GitHub or the internet. iPhone
+  Safari has no Web Bluetooth, so open it in the free Bluefy browser.
+
+  Add ?demo to the address to try the page without a totem.
+-->
+<style>
+  :root {
+    --bg: #0b0b10;
+    --card: #16161e;
+    --card-2: #1e1e29;
+    --line: #2a2a38;
+    --text: #f2f2f7;
+    --dim: #9a9aab;
+    --faint: #5c5c6e;
+    --accent: #ff3b5c;
+    --accent-ink: #ffffff;
+    --cyan: #00c8ff;
+    --ok: #34d17a;
+    --warn: #ffb020;
+    --radius: 16px;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  body {
+    font: 16px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+    max-width: 520px; margin: 0 auto;
+  }
+  h1 { font-size: 22px; margin: 4px 0 16px; letter-spacing: -0.01em; display: flex; align-items: center; gap: 10px; }
+  h1 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--faint); }
+  h1 .dot.on { background: var(--ok); box-shadow: 0 0 10px var(--ok); }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim); margin: 0 0 10px; font-weight: 600; }
+  .card { background: var(--card); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; }
+  button {
+    font: inherit; color: var(--text); background: var(--card-2); border: 1px solid var(--line);
+    border-radius: 12px; padding: 12px 14px; min-height: 48px; cursor: pointer; touch-action: manipulation;
+  }
+  button:active { transform: scale(0.98); }
+  button:disabled { opacity: 0.4; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  button.big { width: 100%; font-size: 18px; min-height: 56px; }
+  input {
+    font: inherit; font-size: 18px; color: var(--text); background: var(--card-2); border: 1px solid var(--line);
+    border-radius: 12px; padding: 12px 14px; width: 100%; min-height: 52px; text-transform: uppercase;
+  }
+  input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  .muted { color: var(--dim); font-size: 14px; }
+  .hide { display: none !important; }
+
+  /* Connect screen */
+  #connectView .card p { margin: 0 0 12px; }
+  #pinRow { margin-top: 12px; }
+  #pin { letter-spacing: 0.3em; text-align: center; }
+  .error { color: var(--warn); font-size: 14px; margin-top: 10px; min-height: 1.4em; }
+
+  /* Heart rates */
+  .people { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+  .person { background: var(--card-2); border-radius: 12px; padding: 12px; }
+  .person .who { font-size: 13px; color: var(--dim); display: flex; align-items: center; gap: 6px; }
+  .person .bpm { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; margin-top: 2px; }
+  .person .bpm small { font-size: 13px; color: var(--dim); font-weight: 500; margin-left: 4px; }
+  .person.off .bpm { color: var(--faint); }
+  .heart { width: 12px; height: 12px; }
+  .person.on .heart { animation: beat var(--beat, 1s) infinite; }
+  @keyframes beat { 0%, 100% { transform: scale(1); } 15% { transform: scale(1.35); } 30% { transform: scale(1); } 45% { transform: scale(1.15); } }
+
+  .now { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; }
+  .now .what { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .now button { min-height: 40px; padding: 8px 14px; flex: none; }
+
+  /* Say */
+  .say-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .chip { min-height: 36px; padding: 6px 12px; border-radius: 999px; font-size: 14px; }
+  .preview { font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--dim); margin-top: 6px; min-height: 1.4em; word-break: break-all; }
+
+  /* Shows */
+  .shows { display: grid; gap: 8px; }
+  .shows button { text-align: left; }
+  .shows button.playing { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .shows button .tag { color: var(--dim); font-size: 13px; display: block; }
+
+  .toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .switch { width: 56px; height: 32px; border-radius: 999px; background: var(--line); position: relative; border: 0; padding: 0; min-height: 0; flex: none; }
+  .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 26px; height: 26px; border-radius: 50%; background: #fff; transition: left 0.15s; }
+  .switch.on { background: var(--accent); }
+  .switch.on::after { left: 27px; }
+
+  /* Lights on/off */
+  .power { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; padding: 14px 16px; min-height: 64px; }
+  .power .icon { width: 36px; height: 36px; border-radius: 50%; flex: none; display: grid; place-items: center; background: var(--line); color: var(--dim); }
+  .power .icon svg { width: 20px; height: 20px; }
+  .power .label { flex: 1; }
+  .power .label b { display: block; font-size: 17px; }
+  .power.on .icon { background: var(--ok); color: #06210f; box-shadow: 0 0 14px rgba(52, 209, 122, 0.5); }
+  .power .switch { pointer-events: none; }
+  .power.on .switch { background: var(--ok); }
+  .power.on .switch::after { left: 27px; }
+  #mainView.dark .card.dims { opacity: 0.45; }
+
+  .levels { display: flex; gap: 6px; }
+  .levels button { flex: 1; padding: 0; font-weight: 600; }
+  .levels button.sel { background: var(--text); color: var(--bg); border-color: var(--text); }
+
+  .toast {
+    position: fixed; left: 50%; bottom: max(24px, env(safe-area-inset-bottom)); transform: translateX(-50%) translateY(12px);
+    background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 999px; font-weight: 600; font-size: 15px;
+    opacity: 0; transition: transform 0.2s, opacity 0.2s; pointer-events: none; max-width: calc(100% - 32px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+  footer { text-align: center; margin-top: 16px; }
+  footer button { background: none; border: 0; color: var(--dim); font-size: 14px; min-height: 40px; }
+</style>
+</head>
+<body>
+
+<h1><span class="dot" id="dot"></span><span id="title">Totem Remote</span></h1>
+
+<!-- Not connected -->
+<section id="connectView">
+  <div class="card" id="noBluetooth" hidden>
+    <h2>Open this in Bluefy</h2>
+    <p>Safari on iPhone can't use Bluetooth. Install the free <b>Bluefy</b> browser from the App Store and open this page in it.</p>
+    <p class="muted">Then add it to Bluefy's bookmarks so it's one tap at the show.</p>
+  </div>
+  <div class="card" id="connectCard">
+    <p>Turn on the totem, then connect. Your phone needs to be within about 10 metres.</p>
+    <div id="pinRow">
+      <input id="pin" inputmode="numeric" autocomplete="off" placeholder="PIN" maxlength="12">
+    </div>
+    <div style="margin-top:12px"><button class="primary big" id="connectBtn">Connect</button></div>
+    <div class="error" id="connectError"></div>
+  </div>
+</section>
+
+<!-- Connected -->
+<section id="mainView" class="hide">
+  <div class="card hide" id="powerCard" style="padding:6px">
+    <button class="power on" id="powerBtn" role="switch" aria-checked="true" aria-label="Lights">
+      <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 3v8"/><path d="M6.3 7.2a8 8 0 1 0 11.4 0"/></svg></span>
+      <span class="label"><b id="powerLabel">Lights on</b><span class="muted" id="powerSub">Tap to turn every LED off</span></span>
+      <span class="switch"></span>
+    </button>
+  </div>
+
+  <div class="card">
+    <h2>Heart rates</h2>
+    <div class="people" id="people"></div>
+    <div class="now" id="now"><div><div class="muted" id="nowLabel">Next show</div><div class="what" id="nowWhat">—</div></div>
+      <button id="stopBtn" class="hide">Stop</button></div>
+  </div>
+
+  <div class="card dims">
+    <h2>Say something</h2>
+    <form id="sayForm" autocomplete="off">
+      <input id="sayText" placeholder="HAPPY BIRTHDAY SAM" enterkeyhint="send" autocapitalize="characters" spellcheck="false">
+      <div class="preview" id="sayPreview"></div>
+      <div class="say-meta">
+        <span class="muted" id="sayCount">0/60</span>
+        <div class="row" style="flex:none;gap:8px">
+          <button type="button" id="heartBtn" aria-label="Add a heart">♥</button>
+          <button class="primary" type="submit" id="sayBtn" style="min-width:96px">Scroll it</button>
+        </div>
+      </div>
+    </form>
+    <div class="chips" id="recent"></div>
+  </div>
+
+  <div class="card dims">
+    <h2>Play now</h2>
+    <div class="shows" id="shows"></div>
+  </div>
+
+  <div class="card dims">
+    <div class="toggle">
+      <div><div style="font-weight:600">Pause timed shows</div><div class="muted">Heart rate only. Playing by hand still works.</div></div>
+      <button class="switch" id="pauseBtn" role="switch" aria-checked="false" aria-label="Pause timed shows"></button>
+    </div>
+  </div>
+
+  <div class="card dims">
+    <h2>Brightness</h2>
+    <div class="levels" id="levels"></div>
+  </div>
+
+  <footer><button id="disconnectBtn">Disconnect</button></footer>
+</section>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// Must match totem_config.h section 8.
+const SERVICE = 'b10ac0de-0001-4e0f-8a5e-746f74656d21';
+const COMMAND = 'b10ac0de-0002-4e0f-8a5e-746f74656d21';
+const STATUS  = 'b10ac0de-0003-4e0f-8a5e-746f74656d21';
+const INFO    = 'b10ac0de-0004-4e0f-8a5e-746f74656d21';
+
+// What the totem's phrase font has (totem/show_font.h). '#' is its heart.
+const ALLOWED = /[A-Z0-9 '!.,?&#-]/;
+const MAX_TEXT = 60;
+
+const $ = id => document.getElementById(id);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
+
+// ---------------------------------------------------------------------------
+// Talking to the totem. Web Bluetooth allows one operation at a time, so
+// every read and write goes through one queue.
+// ---------------------------------------------------------------------------
+class Totem {
+  constructor() { this.q = Promise.resolve(); this.enc = new TextEncoder(); this.dec = new TextDecoder(); }
+  run(fn) { const p = this.q.then(fn, fn); this.q = p.catch(() => {}); return p; }
+
+  async connect() {
+    this.device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE] }] });
+    this.device.addEventListener('gattserverdisconnected', () => this.onDisconnect && this.onDisconnect());
+    await this.attach();
+  }
+  async attach() {
+    const server = await this.device.gatt.connect();
+    const svc = await server.getPrimaryService(SERVICE);
+    [this.cmd, this.status, this.info] = await Promise.all([COMMAND, STATUS, INFO].map(u => svc.getCharacteristic(u)));
+  }
+  get name() { return this.device && this.device.name; }
+  get connected() { return !!(this.device && this.device.gatt.connected); }
+  send(line) { return this.run(() => this.cmd.writeValueWithResponse(this.enc.encode(line))); }
+  read(chr) { return this.run(async () => JSON.parse(this.dec.decode(await this[chr].readValue()))); }
+  disconnect() { if (this.connected) this.device.gatt.disconnect(); }
+}
+
+// A totem that lives in the page, for ?demo.
+class DemoTotem {
+  constructor() {
+    this.s = { auth: 0, you: { on: 1, bpm: 92 }, crew: [{ i: 'V', on: 1, bpm: 104 }], bright: 3, power: 1, shows: 1, playing: -1, show: '', left: 0, next: 287, paused: 0 };
+    this.phrases = ["WE'RE ALL WE NEED", 'LIFE IS MADE OF SMALL MOMENTS LIKE THESE', 'ALWAYS CHOOSE ADVENTURE', "GLAD YOU'RE HERE", "YOU ARE SOMEBODY'S FAVORITE MEMORY", 'MAIN CHARACTER ENERGY', 'PUSH THE BUTTON', 'HAPPY BIRTHDAY JACK', 'ABOVE & BEYOND', 'THIS IS GROUP THERAPY', 'QUEEN MARY'];
+    setInterval(() => this.tick(), 1000);
+  }
+  tick() {
+    const s = this.s, j = () => Math.round(Math.random() * 4 - 2);
+    s.you.bpm = Math.max(60, Math.min(175, s.you.bpm + j()));
+    s.crew[0].bpm = Math.max(60, Math.min(175, s.crew[0].bpm + j()));
+    if (s.playing >= -2 && s.playing !== -1) { if (--s.left <= 0) this.end(); }
+    else if (s.power && !s.paused && --s.next <= 0) { this.play(0, null); }
+  }
+  end() { Object.assign(this.s, { playing: -1, show: '', left: 0, next: 300 }); }
+  play(n, text) { Object.assign(this.s, { playing: text ? -2 : n, show: text || (n === 0 ? 'Spin' : this.phrases[n - 1]), left: n === 0 && !text ? 8 : 70, next: -1 }); }
+  name = 'Totem (demo)';
+  connected = true;
+  async connect() { await new Promise(r => setTimeout(r, 400)); }
+  async attach() {}
+  async send(line) {
+    const [w, ...r] = line.split(' '), a = r.join(' ');
+    if (w === 'PIN') this.s.auth = a.length ? 1 : 0;
+    if (w === 'SAY') this.play(0, a);
+    if (w === 'PLAY') this.play(+a, null);
+    if (w === 'STOP') this.end();
+    if (w === 'PAUSE') { this.s.paused = +a; if (+a) this.end(); else this.s.next = 300; }
+    if (w === 'BRIGHT') { this.s.bright = +a; this.s.power = 1; }
+    if (w === 'POWER') { this.s.power = +a; if (!+a) this.end(); else this.s.next = 300; }
+    if (w === 'SAY' || w === 'PLAY') this.s.power = 1;
+  }
+  async read(chr) {
+    if (!this.s.auth) return { auth: 0 };
+    return chr === 'info' ? { auth: 1, levels: 5, max: 60, ship: this.phrases.length, shipLaps: 3, phrases: this.phrases } : JSON.parse(JSON.stringify(this.s));
+  }
+  disconnect() { this.connected = false; this.onDisconnect && this.onDisconnect(); }
+}
+
+const demo = new URLSearchParams(location.search).has('demo');
+let totem = null, info = null, status = null, pollTimer = null, wantConnected = false;
+
+// ---------------------------------------------------------------------------
+// Connecting and unlocking
+// ---------------------------------------------------------------------------
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function unlock(pin) {
+  await totem.send('PIN ' + pin);
+  await sleep(150);
+  const s = await totem.read('status');
+  return s.auth === 1;
+}
+
+async function connect() {
+  const pin = $('pin').value.trim();
+  $('connectError').textContent = '';
+  if (!pin) { $('connectError').textContent = 'Type the PIN first.'; $('pin').focus(); return; }
+  $('connectBtn').disabled = true;
+  $('connectBtn').textContent = 'Connecting…';
+  try {
+    totem = demo ? new DemoTotem() : new Totem();
+    totem.onDisconnect = onDisconnect;
+    await totem.connect();
+    if (!(await unlock(pin))) {
+      totem.disconnect();
+      throw new Error('Wrong PIN.');
+    }
+    store.set('pin', pin);
+    wantConnected = true;
+    info = await totem.read('info');
+    buildShows(); buildLevels();
+    showMain(true);
+    poll();
+  } catch (e) {
+    const m = String(e && e.message || e);
+    $('connectError').textContent =
+      /cancel/i.test(m) ? '' :
+      /Wrong PIN/.test(m) ? 'Wrong PIN. Check PHONE_PIN in secrets.h.' :
+      'Couldn’t connect: ' + m;
+  } finally {
+    $('connectBtn').disabled = false;
+    $('connectBtn').textContent = 'Connect';
+  }
+}
+
+// Dropped (walked out of range, totem rebooted): keep trying in the
+// background for a while, then give up and show the connect screen.
+async function onDisconnect() {
+  clearTimeout(pollTimer);
+  setDot(false);
+  if (!wantConnected) { showMain(false); return; }
+  toast('Lost the totem, reconnecting…');
+  for (let i = 0; i < 20 && wantConnected; i++) {
+    await sleep(i < 5 ? 1000 : 3000);
+    try {
+      await totem.attach();
+      if (await unlock(store.get('pin', ''))) { toast('Back on'); poll(); return; }
+    } catch {}
+  }
+  if (wantConnected) { wantConnected = false; showMain(false); $('connectError').textContent = 'Lost the totem. Connect again when you’re closer.'; }
+}
+
+function disconnect() {
+  wantConnected = false;
+  clearTimeout(pollTimer);
+  totem && totem.disconnect();
+  showMain(false);
+}
+
+async function poll() {
+  clearTimeout(pollTimer);
+  try {
+    const s = await totem.read('status');
+    if (s.auth === 1) { status = s; render(); }
+  } catch {}
+  if (wantConnected && totem.connected) pollTimer = setTimeout(poll, 1000);
+}
+
+async function send(line, msg) {
+  try {
+    await totem.send(line);
+    if (msg) toast(msg);
+    setTimeout(poll, 250);
+  } catch (e) { toast('Didn’t send. Still connected?'); }
+}
+
+// ---------------------------------------------------------------------------
+// Drawing
+// ---------------------------------------------------------------------------
+function setDot(on) { $('dot').classList.toggle('on', on); }
+
+function showMain(on) {
+  $('mainView').classList.toggle('hide', !on);
+  $('connectView').classList.toggle('hide', on);
+  $('title').textContent = on ? (totem.name || 'Totem') : 'Totem Remote';
+  setDot(on);
+}
+
+const HEART = c => `<svg class="heart" viewBox="0 0 16 16"><path fill="${c}" d="M8 14 1.6 7.6a3.6 3.6 0 0 1 5.1-5.1L8 3.8l1.3-1.3a3.6 3.6 0 0 1 5.1 5.1Z"/></svg>`;
+
+function personHtml(label, p, color) {
+  const on = p.on && p.bpm > 0;
+  return `<div class="person ${on ? 'on' : 'off'}" style="--beat:${on ? (60 / p.bpm).toFixed(2) : 1}s">
+    <div class="who">${HEART(on ? color : 'var(--faint)')}${label}</div>
+    <div class="bpm">${on ? p.bpm : p.on ? '…' : '--'}<small>${on ? 'bpm' : p.on ? 'no reading' : 'not connected'}</small></div></div>`;
+}
+
+const fmtTime = s => s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : `${s}s`;
+const showText = t => t.replace(/#/g, '♥');
+
+function render() {
+  const s = status;
+  setDot(true);
+  let h = personHtml('You', s.you, '#ff69b4');
+  for (const c of s.crew || []) h += personHtml(c.i, c, '#8200ff');
+  $('people').innerHTML = h;
+
+  const hasPower = s.power !== undefined;   // older firmware doesn't have it
+  const lit = !hasPower || !!s.power;
+  $('powerCard').classList.toggle('hide', !hasPower);
+  $('powerBtn').classList.toggle('on', lit);
+  $('powerBtn').setAttribute('aria-checked', lit ? 'true' : 'false');
+  $('powerLabel').textContent = lit ? 'Lights on' : 'Lights off';
+  $('powerSub').textContent = lit ? 'Tap to turn every LED off' : 'Dark. Tap to turn back on';
+  $('mainView').classList.toggle('dark', !lit);
+
+  const playing = s.shows && s.playing !== -1;
+  $('stopBtn').classList.toggle('hide', !playing);
+  if (!lit) { $('nowLabel').textContent = 'Lights off'; $('nowWhat').textContent = 'No shows while dark'; }
+  else if (!s.shows) { $('nowLabel').textContent = 'Shows'; $('nowWhat').textContent = 'Off in this build'; }
+  else if (playing) { $('nowLabel').textContent = `Playing · ${fmtTime(s.left)} left`; $('nowWhat').textContent = showText(s.show); }
+  else if (s.paused) { $('nowLabel').textContent = 'Timed shows'; $('nowWhat').textContent = 'Paused'; }
+  else { $('nowLabel').textContent = 'Next show'; $('nowWhat').textContent = s.next >= 0 ? `in ${fmtTime(s.next)}` : '—'; }
+
+  document.querySelectorAll('#shows button').forEach(b => b.classList.toggle('playing', playing && +b.dataset.n === s.playing));
+  $('pauseBtn').classList.toggle('on', !!s.paused);
+  $('pauseBtn').setAttribute('aria-checked', s.paused ? 'true' : 'false');
+  document.querySelectorAll('#levels button').forEach(b => b.classList.toggle('sel', +b.dataset.n === s.bright));
+}
+
+function buildShows() {
+  const el = $('shows');
+  el.innerHTML = '';
+  const add = (n, label, tag) => {
+    const b = document.createElement('button');
+    b.dataset.n = n;
+    b.innerHTML = label + (tag ? `<span class="tag">${tag}</span>` : '');
+    b.onclick = () => send('PLAY ' + n, n === 0 ? 'Spinning' : 'Playing');
+    el.appendChild(b);
+  };
+  add(0, 'Spin', 'The faces spin round the ring · about 8 s');
+  const ship = info.ship;   // her show number, from firmware that has her
+  if (ship) {
+    const laps = info.shipLaps || 1;
+    add(ship, 'Queen Mary', `A liner sails round the ring at night${laps > 1 ? ` · ${laps} laps` : ''}`);
+  }
+  (info.phrases || []).forEach((p, i) => { if (i + 1 !== ship) add(i + 1, showText(p), ''); });
+}
+
+function buildLevels() {
+  const el = $('levels');
+  el.innerHTML = '';
+  for (let n = 1; n <= (info.levels || 5); n++) {
+    const b = document.createElement('button');
+    b.dataset.n = n;
+    b.textContent = n;
+    b.onclick = () => { send('BRIGHT ' + n); if (status) { status.bright = n; render(); } };
+    el.appendChild(b);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Say something
+// ---------------------------------------------------------------------------
+// What the totem will actually show: capitals, its characters only, one space at a time.
+function clean(t) {
+  t = t.toUpperCase().replace(/[♥❤️💖💗💓💕]/gu, '#').replace(/[‘’]/g, "'").replace(/[–—]/g, '-');
+  let out = '';
+  for (const c of t) if (ALLOWED.test(c) && !(c === ' ' && (out === '' || out.endsWith(' ')))) out += c;
+  return out.trimEnd().slice(0, (info && info.max) || MAX_TEXT);
+}
+
+function updateSay() {
+  const raw = $('sayText').value, c = clean(raw);
+  $('sayCount').textContent = `${c.length}/${(info && info.max) || MAX_TEXT}`;
+  // Only when it differs from what was typed (beyond capitals and spacing).
+  const typed = raw.toUpperCase().replace(/\s+/g, ' ').trim();
+  $('sayPreview').textContent = typed && showText(c) !== typed ? 'Shows as: ' + showText(c) : '';
+  $('sayBtn').disabled = !c;
+}
+
+function renderRecent() {
+  const el = $('recent');
+  el.innerHTML = '';
+  for (const t of store.get('recent', [])) {
+    const b = document.createElement('button');
+    b.className = 'chip';
+    b.textContent = showText(t);
+    b.onclick = () => send('SAY ' + t, 'Scrolling: ' + showText(t));
+    el.appendChild(b);
+  }
+}
+
+$('sayForm').onsubmit = e => {
+  e.preventDefault();
+  const t = clean($('sayText').value);
+  if (!t) return;
+  send('SAY ' + t, 'Scrolling: ' + showText(t));
+  store.set('recent', [t, ...store.get('recent', []).filter(x => x !== t)].slice(0, 8));
+  renderRecent();
+  $('sayText').value = '';
+  updateSay();
+  $('sayText').blur();
+};
+$('sayText').oninput = updateSay;
+$('heartBtn').onclick = () => { const i = $('sayText'); i.value = i.value.replace(/\s*$/, i.value.trim() ? ' ♥' : '♥'); updateSay(); i.focus(); };
+
+// ---------------------------------------------------------------------------
+$('connectBtn').onclick = connect;
+$('pin').onkeydown = e => { if (e.key === 'Enter') connect(); };
+$('stopBtn').onclick = () => send('STOP', 'Back to heart rate');
+$('pauseBtn').onclick = () => {
+  const on = !(status && status.paused);
+  send('PAUSE ' + (on ? 1 : 0), on ? 'Timed shows paused' : 'Timed shows back on');
+  if (status) { status.paused = on ? 1 : 0; if (on) status.playing = -1; render(); }
+};
+$('powerBtn').onclick = () => {
+  const on = !(status && status.power);
+  send('POWER ' + (on ? 1 : 0), on ? 'Lights on' : 'Lights off');
+  if (status) { status.power = on ? 1 : 0; if (!on) status.playing = -1; render(); }
+};
+$('disconnectBtn').onclick = disconnect;
+
+let toastTimer;
+function toast(m) {
+  const t = $('toast');
+  t.textContent = m;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 1800);
+}
+
+$('pin').value = store.get('pin', demo ? '1234' : '');
+if (!demo && !navigator.bluetooth) { $('noBluetooth').hidden = false; $('connectCard').hidden = true; }
+if (demo) $('title').textContent = 'Totem Remote (demo)';
+renderRecent();
+updateSay();
+</script>
+</body>
+</html>

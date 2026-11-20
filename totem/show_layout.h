@@ -6,7 +6,7 @@
 // drawn by running this same code on a laptop.
 // ============================================================================
 //
-// Both shows draw onto the whole ring: 64 columns round (the four faces in
+// All the shows draw onto the whole ring: 64 columns round (the four faces in
 // chain order, see ringBlockPanel() in totem.ino) by 16 rows.
 //
 // SCROLLING MESSAGE
@@ -25,11 +25,17 @@
 //   Optionally (numbers, off by default) a stock ticker comes round behind
 //   them first: a pulsing heart, the BPM in its zone colour, and a green up or
 //   red down arrow with how much it moved over the last 10 minutes. Yours
-//   (red heart), then your friend's (cyan), twice round.
+//   (hot pink heart), then your friend's (purple), twice round.
+//
+// QUEEN MARY
+//   The heart rate fades out, a night sea fades in, and a three-funnel liner
+//   sails round the ring under the stars (SHOW_SHIP_LAPS times), then fades
+//   away. See Ship below.
 
 #include <stdint.h>
 #include <math.h>
 #include <string.h>
+#include <stdlib.h>
 #include "face_layout.h"
 #include "show_font.h"
 
@@ -169,7 +175,7 @@ struct People {
   bool deltaKnown[2];
   int delta[2];         // BPM now minus 10 minutes ago (or as far back as known)
   Rgb zone[2];          // the BPM's zone colour
-  Rgb heart[2];         // red for you, cyan for your friend
+  Rgb heart[2];         // hot pink for you, purple for your friend
   float beat[2];        // heartbeat pulse 0..1, for the ticker's hearts
 };
 
@@ -309,14 +315,222 @@ struct Ticker {
 };
 
 // ---------------------------------------------------------------------------
+// Ship (a Queen Mary style liner sailing round the ring at night)
+// ---------------------------------------------------------------------------
+// The heart rate fades out and a night sea fades in: dark sky with a few
+// twinkling stars, and slow rolling water on the bottom four rows. (No
+// moon: at this size it was just a blob.) Out of the dark comes the ship: black hull
+// with a row of lit portholes and a red waterline, white decks with warm
+// windows, three upright red funnels with black tops and two masts. She sails
+// round the ring (laps times) at a stately pace, a bow wave at the front and a wake
+// that grows behind her, her lit windows reflected in the water. Then she fades into the dark, the sea goes, and
+// the heart rate fades back in.
+
+// The ship, bow on the right (she sails towards higher columns).
+//   K hull  o porthole  R red waterline  W white deck  w shadowed deck
+//   y window  F funnel  B funnel top  M mast
+static const char *const SHIP_ART[] = {
+  ".......................M......",
+  "....M..BBB..BBB..BBB...M......",
+  "....M..FFF..FFF..FFF...M......",
+  "....M..FFF..FFF..FFF...M......",
+  "....M..FFF..FFF..FFF...M......",
+  "....M..FFF..FFF..FFF...M......",
+  "....wWWWWWWWWWWWWWWWWWWWw.....",
+  "...WWyWyWyWyWyWyWyWyWyWyWWw...",
+  "KKKKKKKKKKKKKKKKKKKKKKKKKKKKKK",
+  "KKoKKoKKoKKoKKoKKoKKoKKoKKoKK.",
+  ".KKKKKKKKKKKKKKKKKKKKKKKKKKK..",
+  "..RRRRRRRRRRRRRRRRRRRRRRRRR...",
+};
+const int SHIP_H = 12, SHIP_W = 30;
+const int WATER_Y = 12;           // water on rows 12..15
+const int SHIP_FUNNEL_X[3] = {7, 12, 17};   // funnels (upright, rows 1..5), left edge
+
+static const int8_t SHIP_LIGHTS[2][4] = {{29, 8, 23, 0}, {4, 1, 0, 8}};
+
+// Timeline, ms from the start of the show.
+const uint32_t SEA_IN_AT = 450, SEA_IN_MS = 1100;     // after the heart rate fades out
+const uint32_t SHIP_IN_AT = 900, SHIP_IN_MS = 1700;   // she emerges from the dark
+const uint32_t SHIP_OUT_MS = 1600;                    // she and the sea fade together
+const uint32_t SHIP_BLACK_MS = 150;                   // dark before the heart rate fades in
+const int SHIP_STARS = 13;
+
+// Small deterministic random numbers (xorshift): a seed always gives the
+// same sky, so the host tests and GIFs match the totem.
+struct Rng {
+  uint32_t s;
+  explicit Rng(uint32_t seed) : s(seed ? seed : 0x9E3779B9u) {}
+  uint32_t next() { s ^= s << 13; s ^= s >> 17; s ^= s << 5; return s; }
+  int range(int lo, int hi) { return lo + (int)(next() % (uint32_t)(hi - lo + 1)); }   // inclusive
+};
+
+inline uint32_t hash3(int a, int b, int c) {
+  uint32_t h = (uint32_t)a * 0x8DA6B343u ^ (uint32_t)b * 0xD8163841u ^ (uint32_t)c * 0xCB1AB31Fu;
+  h ^= h >> 15; h *= 0x2C1B3C6Du; h ^= h >> 12; h *= 0x297A2D39u; h ^= h >> 15;
+  return h;
+}
+inline float hashUnit(int a, int b, int c) { return (hash3(a, b, c) & 0xFFFF) / 65535.0f; }
+// Smoothly varying noise in 0..1: a new random value every stepMs, eased.
+inline float smoothNoise(int a, int b, uint32_t t, uint32_t stepMs) {
+  int n = (int)(t / stepMs);
+  float f = (float)(t % stepMs) / stepMs;
+  f = f * f * (3 - 2 * f);
+  return hashUnit(a, b, n) * (1 - f) + hashUnit(a, b, n + 1) * f;
+}
+inline float clamp01(float v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+inline Rgb addc(Rgb a, Rgb b) {
+  int r = a.r + b.r, g = a.g + b.g, bl = a.b + b.b;
+  return rgb((uint8_t)(r > 255 ? 255 : r), (uint8_t)(g > 255 ? 255 : g), (uint8_t)(bl > 255 ? 255 : bl));
+}
+inline int wrapCol(int c) { c %= COLS; return c < 0 ? c + COLS : c; }
+
+struct ShipPx { Rgb c; float a; };   // a ship pixel and how solid it is
+
+struct Ship {
+  float startCol, pxPerS;
+  uint32_t seed;
+  int8_t starX[SHIP_STARS], starY[SHIP_STARS];
+  uint32_t lapAt, outAt, blackAt, fadeInAt, endAt;
+
+  void build(uint32_t seed_, float pxPerS_, int laps = 1) {
+    seed = seed_;
+    Rng rng(seed);
+    pxPerS = pxPerS_ < 1 ? 1 : pxPerS_;
+    startCol = (float)rng.range(0, COLS - 1);
+    for (int i = 0; i < SHIP_STARS; i++) {
+      int x, y, tries = 0;
+      do {
+        x = rng.range(0, COLS - 1); y = rng.range(0, 7);
+        bool clash = false;
+        for (int j = 0; j < i && !clash; j++)
+          clash = abs(wrapCol(x - starX[j] + COLS / 2) - COLS / 2) < 3 && abs(y - starY[j]) < 2;
+        if (!clash) break;
+      } while (++tries < 20);
+      starX[i] = (int8_t)x; starY[i] = (int8_t)y;
+    }
+    if (laps < 1) laps = 1;
+    lapAt = SHIP_IN_AT + SHIP_IN_MS + (uint32_t)(laps * COLS * 1000.0f / pxPerS);
+    outAt = lapAt;
+    blackAt = outAt + SHIP_OUT_MS;
+    fadeInAt = blackAt + SHIP_BLACK_MS;
+    endAt = fadeInAt + FADE_IN_MS;
+  }
+
+  // Ship's left edge (stern) at t, in ring columns, not wrapped.
+  float pos(uint32_t t) const {
+    float s = t > SHIP_IN_AT ? (float)(t - SHIP_IN_AT) : 0;
+    return startCol + pxPerS * s / 1000.0f;
+  }
+
+  // The ship's own pixel at ship coordinates (x, y).
+  ShipPx art(int x, int y, uint32_t t) const {
+    ShipPx p = {rgb(0, 0, 0), 0};
+    if (x < 0 || x >= SHIP_W || y < 0 || y >= SHIP_H) return p;
+    char k = SHIP_ART[y][x];
+    switch (k) {
+      case 'K': p.c = rgb(6, 7, 10); break;
+      case 'o': p.c = scale(rgb(255, 165, 50), 0.75f + 0.25f * smoothNoise(x, y, t, 700)); break;
+      case 'R': p.c = rgb(170, 18, 8); break;
+      case 'W': p.c = rgb(160, 160, 150); break;
+      case 'w': p.c = rgb(85, 85, 80); break;
+      case 'y': p.c = rgb(255, 175, 60); break;
+      case 'F': p.c = rgb(210, 14, 6); break;   // the waterline's red, brighter (more green reads orange)
+      case 'B': p.c = rgb(8, 8, 9); break;
+      case 'M': p.c = rgb(55, 55, 60); break;
+      default: return p;
+    }
+    p.a = 1;
+    return p;
+  }
+
+  // The night sky behind everything at (x, y).
+  Rgb sky(int x, int y, uint32_t t) const {
+    // A faint deep-blue haze, brightest at the horizon.
+    float hz = y < 4 ? 0 : (float)(y - 3) / (WATER_Y - 4);
+    Rgb c = rgb(0, (uint8_t)(3 + 7 * hz * hz), (uint8_t)(6 + 22 * hz * hz));
+    if (y < 4) c = rgb(0, 0, 0);
+    for (int i = 0; i < SHIP_STARS; i++)
+      if (starX[i] == x && starY[i] == y) {
+        float tw = smoothNoise(i, 5, t, 900);
+        float k = 0.25f + 0.75f * tw * tw;
+        Rgb s = (i % 3) ? rgb(150, 155, 175) : rgb(175, 165, 135);
+        return addc(c, scale(s, k));
+      }
+    return c;
+  }
+
+  // The sea at (x, y), y = WATER_Y..15. wakeK: 0..1 foam from the wake.
+  Rgb sea(int x, int y, uint32_t t) const {
+    const float TAU = 6.2831853f;
+    float ts = t / 1000.0f;
+    int r = y - WATER_Y;                    // 0 = the surface row
+    // Long swells plus a shorter chop, both seamless round the ring.
+    float w1 = sinf(TAU * 3 * x / COLS - 0.9f * ts + r * 0.8f);
+    float w2 = sinf(TAU * 7 * x / COLS + 1.6f * ts + r * 1.7f);
+    float w = 0.5f + 0.32f * w1 + 0.18f * w2;   // 0..1
+    static const Rgb BASE[4] = {{0, 48, 92}, {0, 30, 70}, {0, 20, 52}, {0, 12, 38}};
+    Rgb c = scale(BASE[r], 0.55f + 0.7f * w);
+    if (r == 0 && w > 0.86f) c = addc(c, scale(rgb(50, 120, 150), (w - 0.86f) / 0.14f));   // crests
+    return c;
+  }
+
+  // Draws the scene at t: sea and sky at seaK, the ship at shipK.
+  void draw(uint32_t t, float seaK, float shipK, Frame &out) const {
+    float p = pos(t);
+    int pi = (int)floorf(p);                    // whole-pixel steps
+    float travelled = p - startCol;
+    for (int x = 0; x < COLS; x++) {
+      int lx = wrapCol(x - pi);                 // ship column under ring column x
+      for (int y = 0; y < ROWS; y++) {
+        Rgb bg = y >= WATER_Y ? sea(x, y, t) : sky(x, y, t);
+        if (y >= WATER_Y) {
+          int r = y - WATER_Y;
+          // The wake: white foam behind the stern on the surface, fading
+          // with distance, growing as she gets going.
+          float d = (float)wrapCol(pi - x);     // columns behind the stern
+          float len = travelled < 22 ? travelled : 22;
+          if (d > 0 && d < len && r <= 1) {
+            float k = expf(-d / (r ? 5.0f : 9.0f)) * (r ? 0.6f : 1.0f);
+            float fl = smoothNoise(x, y, t, 160);         // churning foam
+            k *= 0.35f + 0.65f * fl * fl;
+            bg = mixc(bg, rgb(175, 200, 210), clamp01(k) * shipK);
+          }
+          // Bow wave.
+          float bd = (float)lx - (SHIP_W - 4);
+          if (r == 0 && bd > -2 && bd < 3) {
+            float k = (1 - fabsf(bd - 0.5f) / 2.5f) * (0.5f + 0.5f * smoothNoise(x, 3, t, 150));
+            bg = mixc(bg, rgb(170, 195, 205), clamp01(k) * shipK);
+          }
+          // Her lights in the water, wobbling.
+          int ry = WATER_Y - 2 - r * 2;         // portholes, then windows above
+          if (r >= 1 && ry >= 6) {
+            ShipPx ra = art(lx, ry, t);
+            float wob = smoothNoise(x, y, t, 220);
+            if (ra.a > 0 && wob > 0.35f) bg = addc(bg, scale(ra.c, 0.28f * (wob - 0.35f) / 0.65f * shipK / r));
+          }
+          out[y][x] = scale(bg, seaK);
+          continue;
+        }
+        // Over the sky: the ship (faded by shipK) on the faded sky.
+        ShipPx a = art(lx, y, t);
+        float al = a.a * shipK;
+        out[y][x] = addc(scale(bg, seaK * (1 - al)), scale(a.c, al));
+      }
+    }
+  }
+};
+
+// ---------------------------------------------------------------------------
 // The player
 // ---------------------------------------------------------------------------
-enum Kind : uint8_t { NONE = 0, TICKER = 1, PHRASE = 2 };
+enum Kind : uint8_t { NONE = 0, TICKER = 1, PHRASE = 2, SHIP = 3 };
 
 struct Player {
   Kind kind = NONE;
   Message message;
   Ticker ticker;
+  Ship ship;
   Rgb textRgb = {255, 255, 255};
 
   void startPhrase(const char *phrase, float pxPerS, Rgb text, int repeats = 1) {
@@ -339,8 +553,14 @@ struct Player {
     uint32_t t = SCROLL_AT_MS + (uint32_t)((DARK_FROM + o) / m.pxPerMs) + 1;
     return t < m.endAt ? t : m.endAt;
   }
+  // seed: where she starts and where the stars sit. pxPerS: how fast
+  // she sails round (one lap is 64 columns). laps: times round before she fades.
+  void startShip(uint32_t seed, float pxPerS, int laps = 1) {
+    kind = SHIP;
+    ship.build(seed, pxPerS, laps);
+  }
   uint32_t duration() const {
-    return kind == PHRASE ? message.endAt : kind == TICKER ? ticker.endAt : 0;
+    return kind == PHRASE ? message.endAt : kind == TICKER ? ticker.endAt : kind == SHIP ? ship.endAt : 0;
   }
 
   // Draws the show at t ms into out. normal is the heart rate display as the
@@ -353,7 +573,36 @@ struct Player {
       for (int x = 0; x < COLS; x++) out[y][x] = rgb(0, 0, 0);
     if (kind == PHRASE) return renderPhrase(t, normal, out);
     if (kind == TICKER) return renderTicker(t, normal, p, out);
+    if (kind == SHIP) return renderShip(t, normal, out);
     return 0;
+  }
+
+  float renderShip(uint32_t t, const Frame &normal, Frame &out) const {
+    const Ship &sh = ship;
+    if (t < FADE_OUT_MS) {
+      float k = 1.0f - (float)t / FADE_OUT_MS;
+      for (int y = 0; y < ROWS; y++)
+        for (int x = 0; x < COLS; x++) out[y][x] = scale(normal[y][x], k * k);
+      return 0;
+    }
+    if (t >= sh.fadeInAt) {
+      float k = (float)(t - sh.fadeInAt) / FADE_IN_MS;
+      for (int y = 0; y < ROWS; y++)
+        for (int x = 0; x < COLS; x++) out[y][x] = scale(normal[y][x], k * k);
+      return 0;
+    }
+    if (t >= sh.blackAt) return 1;
+    float seaK = clamp01((float)(t - SEA_IN_AT) / SEA_IN_MS);
+    float shipK = t < SHIP_IN_AT ? 0 : clamp01((float)(t - SHIP_IN_AT) / SHIP_IN_MS);
+    if (t >= sh.outAt) {
+      float k = 1.0f - (float)(t - sh.outAt) / SHIP_OUT_MS;
+      seaK *= k; shipK *= k;
+    }
+    // Ease both, so the dark comes and goes gently.
+    seaK = seaK * seaK * (3 - 2 * seaK);
+    shipK = shipK * shipK * (3 - 2 * shipK);
+    sh.draw(t, seaK, shipK, out);
+    return 1;
   }
 
   float renderPhrase(uint32_t t, const Frame &normal, Frame &out) const {
@@ -451,22 +700,33 @@ struct Player {
 // ---------------------------------------------------------------------------
 // Choosing the next show, and heart rate history for the ticker's arrows
 // ---------------------------------------------------------------------------
-// Programs are numbered 0 = ticker, 1..phrases = the phrases in order.
+// Programs are numbered 0 = ticker, 1..phrases = the phrases in order, then
+// the ship (when SHOW_SHIP is on), which takes its turn like a phrase.
 
 // Test mode: every program in turn.
 inline int nextInOrder(int last, int count) { return count <= 0 ? -1 : (last + 1) % count; }
 
-// Festival mode: the spin and the phrases take turns, spin first, and each
-// phrase turn plays the one after the last phrase played, round and round.
+// Festival mode: three turns round and round, spin, a phrase, the ship. Each
+// phrase turn plays the one after the last phrase played. Programs: 0 the
+// spin, 1..phrases the phrases, phrases + 1 the ship (when ship is on).
 // last: the program played last (-1: none yet). lastPhrase: the last phrase
-// played, 1..count-1 (0: none yet). Without the spin (tickerOk false) it's
-// just the phrases in turn.
-inline int nextAlternating(int last, int lastPhrase, int count, bool tickerOk) {
-  const int phrases = count - 1;
-  if (tickerOk && (last != 0 || phrases <= 0)) return 0;
-  if (phrases <= 0) return -1;
-  int p = lastPhrase >= 1 && lastPhrase <= phrases ? lastPhrase : 0;   // 0..phrases-1 next
-  return 1 + p % phrases;
+// played, 1..phrases (0: none yet). A turn that can't play (no spin when
+// tickerOk is false, no phrases, no ship) is skipped. -1: nothing can play.
+inline int nextRotation(int last, int lastPhrase, int phrases, bool ship, bool tickerOk) {
+  const int shipProg = 1 + phrases;
+  // The turn last played: 0 spin, 1 phrase, 2 ship. Nothing yet counts as
+  // the ship, so the spin comes first.
+  int turn = last == 0 ? 0 : (last >= 1 && last <= phrases) ? 1 : 2;
+  for (int k = 1; k <= 3; k++) {
+    int next = (turn + k) % 3;
+    if (next == 0 && tickerOk) return 0;
+    if (next == 1 && phrases > 0) {
+      int p = lastPhrase >= 1 && lastPhrase <= phrases ? lastPhrase : 0;   // 0..phrases-1 next
+      return 1 + p % phrases;
+    }
+    if (next == 2 && ship) return shipProg;
+  }
+  return -1;
 }
 
 // One sample every SAMPLE_MS; the oldest is about 10 minutes back.

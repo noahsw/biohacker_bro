@@ -329,9 +329,9 @@ carries no power, so moving it to another pin can't damage anything.
 
 ### Totem shows (`totem/show_layout.h`)
 
-Every 5 minutes the totem's heart rate steps aside for one show. The spin and
-the messages take turns, so each comes round every 10 minutes, and each message
-turn plays the next phrase in `SHOW_PHRASES`:
+Every 5 minutes the totem's heart rate steps aside for one show. Three turns go
+round: the spin, a message, then the Queen Mary, so each comes round every 15
+minutes, and each message turn plays the next phrase in `SHOW_PHRASES`:
 
 - **Spin:** the four faces spin round the ring twice (about 8 seconds), then
   bump into place and the zone bars flash. `SHOW_TICKER_NUMBERS 1` adds a stock
@@ -341,6 +341,9 @@ turn plays the next phrase in `SHOW_PHRASES`:
   panel is the seam: the letters fade in out of one side of it, its middle
   stays dark so the crowd can see where the line starts, and they fade out into
   its other side.
+- **Queen Mary:** a night sea with twinkling stars fades in and a three-funnel
+  liner sails round the ring `SHOW_SHIP_LAPS` times (3, about 53 seconds), her
+  wake behind her, then fades away. `SHOW_SHIP 0` turns her off.
 
 Settings are section 7 of `totem/totem_config.h`. `SHOW_TEST_MODE 1` plays
 every show back to back with 4 seconds of heart rate between, to check them
@@ -350,6 +353,53 @@ under `LED_MAX_MA`. Both shows need `RING_REVERSE` right (it's 1 on this
 totem): if text or faces jump between panels instead of flowing round, flip it
 (the orientation test's walking dot shows which way the chain runs). The layout and the font are
 host-tested (`tests/test_show_layout.cpp`).
+
+### Totem phone remote (`totem/phone_ble.cpp`, `docs/remote/`)
+
+A control page for the totem on your iPhone: scroll your own text right away,
+play the spin or a phrase now, pause the timed shows, set the brightness,
+turn the lights off and on, and see whether your Whoop and friends are
+connected and their heart rates.
+
+**Lights off** blanks every LED but leaves Bluetooth running, so the phone
+can turn them back on (the board itself stays powered: unplug the battery
+for truly off). Touching the thumb wheel, picking a brightness, or playing
+something from the phone turns them back on too. It isn't saved: a reboot
+always comes back lit.
+
+**How it fits together.** Nothing goes through the internet. The totem
+advertises itself over Bluetooth as "Totem", the way a heart rate strap does,
+and accepts one phone connection. The page (`docs/remote/index.html`) is
+plain HTML that GitHub Pages serves; once your phone has loaded it, the
+phone's browser talks to the totem directly over Bluetooth (the Web
+Bluetooth API). GitHub only hands over the page. iPhone Safari can't do Web
+Bluetooth, so open it in the free **Bluefy** browser.
+
+Setup, once:
+
+1. In `secrets.h`, pick a PIN: `#define PHONE_PIN "4821"`. Without it the PIN
+   is `1234` and the serial log says so at boot.
+2. Flash the totem.
+3. GitHub Pages: repo Settings → Pages → Deploy from a branch → `main`,
+   folder `/docs`. The page is then at
+   `https://noahsw.github.io/biohacker_bro/remote/`.
+4. On the iPhone, install Bluefy, open that address, bookmark it. Connect,
+   pick "Totem", type the PIN (the page remembers it).
+
+Add `?demo` to the address to try the page without a totem.
+
+The protocol is lines of text written to one characteristic (`PIN`, `SAY`,
+`PLAY`, `STOP`, `PAUSE`, `BRIGHT`, `POWER`; see `totem/phone_protocol.h`), so a BLE
+app like LightBlue can drive the totem too. A wrong PIN costs 3 seconds; a
+phone that hasn't sent the PIN within 20 seconds is dropped, so a stranger
+can't hold the slot. The PIN goes over the air unencrypted: it keeps casual
+pranksters out, not someone sniffing Bluetooth.
+
+The phone takes one of NimBLE's 3 connections (your Whoop, one friend, the
+phone). With a second friend configured, raise `MYNEWT_VAL_BLE_MAX_CONNECTIONS`
+as `totem_config.h` section 6 describes. Settings are section 8 of
+`totem/totem_config.h`; `PHONE_ENABLED 0` turns it off. The command parser is
+host-tested (`tests/test_phone_protocol.cpp`).
 
 ### Totem beat drop (`totem/audio_drop.cpp`, off by default)
 
@@ -375,7 +425,7 @@ pins untouched). I2S: MCLK IO38, BCLK IO48, LRCK IO21, ES7210 SDOUT1 IO47,
 16 kHz, 16-bit stereo. From the board maker's schematic; not yet run on the
 board.
 
-Settings are section 8 of `totem/totem_config.h`. `DROP_ENABLED 0` (the
+Settings are section 9 of `totem/totem_config.h`. `DROP_ENABLED 0` (the
 default) leaves the mics unpowered and changes nothing. `DROP_TEST_MODE 1`
 shows a sound meter on all four faces instead of the heart rate and logs the
 levels 4 times a second; `drop_fx.h` explains the meter. `dropSetEnabled()`
