@@ -16,6 +16,7 @@
 //   PIN 1234          unlock this connection (nothing else works until then)
 //   SAY HAPPY BDAY    scroll this text now
 //   PLAY 0            play the spin now; PLAY 1.. plays that phrase from SHOW_PHRASES
+//                     (with SHOW_SHIP on, the number after the last phrase is the ship)
 //   STOP              end the show that's on, back to heart rate
 //   PAUSE 1 / PAUSE 0 stop / restart the every-5-minutes shows (playing by hand still works)
 //   BRIGHT 3          brightness level, 1 = dimmest, same levels as the wheel

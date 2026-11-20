@@ -187,23 +187,25 @@
 #define HEART_RGB_FRIEND CRGB(130, 0, 255)   // purple
 
 // --- 7. Shows: something for the crowd every 5 minutes ---
-// Every SHOW_EVERY_MIN minutes the heart rate steps aside for one show. The
-// spin and the phrases take turns (spin, phrase 1, spin, phrase 2, ... and
-// round again), so each comes every 10 minutes: the ticker spin (your and your friend's heart
+// Every SHOW_EVERY_MIN minutes the heart rate steps aside for one show. Three
+// turns go round (spin, phrase 1, Queen Mary, spin, phrase 2, Queen Mary, ...),
+// so each comes every 15 minutes: the ticker spin (your and your friend's heart
 // rates race round the ring like a stock ticker, with a green or red arrow
 // for how far each moved in the last 10 minutes, or with SHOW_TICKER_NUMBERS 0
 // just the faces spinning round) or one of the phrases below scrolling round
-// the ring. The spin takes about 8 seconds, a phrase about 1 to 2 minutes.
+// the ring, or the Queen Mary below. The spin takes about 8 seconds, a phrase
+// about 1 to 2 minutes.
 // With numbers, the ticker only plays while your Whoop is sending.
 // Four-panel faces layout only. See show_layout.h.
 #ifndef SHOWS_ENABLED
 #define SHOWS_ENABLED 1        // 0 = all off: heart rate only, as before
 #endif
 #ifndef SHOW_TEST_MODE
-#define SHOW_TEST_MODE 0       // 1 = every show back to back (ticker, then each phrase), to try them out
+#define SHOW_TEST_MODE 0       // 1 = every show back to back (ticker, each phrase, the ship), to try them out
 #endif
 #define SHOW_EVERY_MIN 5       // minutes between shows (the first, a spin, is this long after power-on)
 #define SHOW_TEST_GAP_S 4      // test mode: seconds of heart rate between shows
+#define SHOW_TEST_SHIP_ONLY 0  // test mode: 1 = just the ship, over and over, for debugging her
 
 #define SHOW_TICKER 1          // 0 = phrases only
 #define SHOW_TICKER_NUMBERS 0  // 1 = big heart, BPM and arrows race round between the faces; 0 = just the faces spin
@@ -223,6 +225,16 @@
 #define SHOW_SCROLL_PX_PER_S 6.0f   // scroll speed, columns a second (a letter is about 6)
 #define SHOW_REPEATS 3         // times each phrase comes round, a panel's width apart
 #define SHOW_TEXT_RGB 255, 255, 255      // text colour
+
+// The Queen Mary: the night sea fades in, a three-funnel liner sails round
+// the ring under the stars with her wake behind her, then fades away.
+// About 53 s at 3 laps. She's the third turn, after a phrase. The phone
+// gives her a button of her own.
+#ifndef SHOW_SHIP
+#define SHOW_SHIP 1            // 0 = no ship
+#endif
+#define SHOW_SHIP_PX_PER_S 4.0f   // sailing speed, columns a second; 4 = one lap in 16 s
+#define SHOW_SHIP_LAPS 3       // times round the ring before she fades and the heart rate comes back
 
 // --- 8. Phone control (see phone_ble.h and docs/remote/) ---
 // Open the control page in the Bluefy browser on your iPhone, tap Connect,

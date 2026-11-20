@@ -14,13 +14,15 @@
   Whoop drops out while a friend is live, all four faces show the friend.
 
   SHOWS (faces layout): every 5 minutes the heart rate steps aside for one
-  show, the spin and the messages taking turns, the messages in order
-  (show_layout.h):
+  show, round and round: spin, a message, Queen Mary, so each comes every
+  15 minutes, the messages in order (show_layout.h):
     - spin: the faces spin round the ring a couple of times, then lock back in
       (SHOW_TICKER_NUMBERS 1 adds a stock ticker of your and your friend's
       heart rates racing past)
     - messages: a phrase scrolls round the ring three times, fading in and
       out of a dark seam on one panel
+    - Queen Mary: a night sea fades in and a three-funnel liner sails
+      round the ring under the stars SHOW_SHIP_LAPS times (SHOW_SHIP 0 turns her off)
   SHOW_TEST_MODE plays them back to back; SHOWS_ENABLED 0 turns them off.
 
   PHONE (phone_ble.h): a phone page over Bluetooth can scroll your own text,
@@ -484,7 +486,18 @@ static void drawOrientationTest() {
 #if SHOWS_ENABLED && !TOTEM_RING
 static_assert(RING_COLS == show::COLS, "shows are laid out for four 16x16 panels");
 static const char *const SHOW_PHRASE_LIST[] = {SHOW_PHRASES};
-static const int SHOW_PROGRAMS = 1 + (int)(sizeof(SHOW_PHRASE_LIST) / sizeof(SHOW_PHRASE_LIST[0]));   // 0 = ticker
+static const int SHOW_PHRASE_COUNT = (int)(sizeof(SHOW_PHRASE_LIST) / sizeof(SHOW_PHRASE_LIST[0]));
+// 0 = the spin, 1.. the phrases, then the ship (the third turn of the rotation).
+static const int SHOW_SHIP_PROG = SHOW_SHIP ? 1 + SHOW_PHRASE_COUNT : -1;
+static const int SHOW_PROGRAMS = 1 + SHOW_PHRASE_COUNT + (SHOW_SHIP ? 1 : 0);
+static const char *const SHOW_SHIP_NAME = "QUEEN MARY";   // on the phone's button and status line
+
+// A program's name: a phrase, or the ship's.
+static const char *showProgName(int prog) {
+  if (prog == 0) return "Spin";
+  if (prog == SHOW_SHIP_PROG) return SHOW_SHIP_NAME;
+  return SHOW_PHRASE_LIST[prog - 1];
+}
 
 static show::Player showPlayer;
 static show::Frame showNormal, showFrame;
@@ -496,7 +509,7 @@ static int showLastPhrase = 0;     // 1.. : the last phrase played, so the next 
 static uint8_t showBright = 255;   // the show's brightness, from its brightest frame
 static int showFriend = -1;        // the friend in this show's ticker
 static bool showsPaused = false;   // from the phone: no timed shows (playing by hand still works)
-static int showPlaying = -1;       // what's on: 0 spin, 1.. a phrase, -2 the phone's text
+static int showPlaying = -1;       // what's on: 0 spin, 1.. a phrase (or the ship, last), -2 the phone's text
 static char showCustom[show::MAX_CHARS + 1];   // the phone's text, for the status line
 
 static Rgb toRgb(const CRGB &c) { return show::rgb(c.r, c.g, c.b); }
@@ -620,8 +633,9 @@ static void scanShowBrightness() {
 }
 
 // Starts a show now (its brightness follows, see scanShowBrightness()).
-// prog: 0 = the spin, 1.. = that phrase in SHOW_PHRASES. text: scroll this
-// instead (the phone's own text; prog is then ignored).
+// prog: 0 = the spin, 1.. = that phrase in SHOW_PHRASES, SHOW_SHIP_PROG = the
+// Queen Mary. text: scroll this instead (the phone's own text; prog is then
+// ignored).
 static void startShow(int prog, const char *text) {
   showFriend = CREW_FACES ? liveFriend() : -1;
   show::People p;
@@ -636,6 +650,10 @@ static void startShow(int prog, const char *text) {
     showPlayer.startTicker(p, SHOW_TICKER_PX_PER_S, SHOW_TICKER_NUMBERS, SHOW_SPIN_LAPS);
     showPlaying = 0;
     name = "ticker";
+  } else if (prog == SHOW_SHIP_PROG) {
+    showPlayer.startShip(esp_random(), SHOW_SHIP_PX_PER_S, SHOW_SHIP_LAPS);
+    showPlaying = prog;
+    name = "ship";
   } else {
     showPlayer.startPhrase(SHOW_PHRASE_LIST[prog - 1], SHOW_SCROLL_PX_PER_S, show::rgb(SHOW_TEXT_RGB), SHOW_REPEATS);
     showPlaying = prog;
@@ -655,17 +673,19 @@ static void startShow(int prog, const char *text) {
 static bool startNextShow() {
   bool tickerOk = SHOW_TICKER && (SHOW_TEST_MODE || !SHOW_TICKER_NUMBERS || (hrConnected && currentBPM > 0));
   int prog;
-  if (SHOW_TEST_MODE) {
+  if (SHOW_TEST_MODE && SHOW_TEST_SHIP_ONLY && SHOW_SHIP) {
+    prog = SHOW_SHIP_PROG;
+  } else if (SHOW_TEST_MODE) {
     prog = show::nextInOrder(showLast, SHOW_PROGRAMS);
     if (prog == 0 && !SHOW_TICKER) prog = show::nextInOrder(prog, SHOW_PROGRAMS);
     if (prog == 0 && !SHOW_TICKER) prog = -1;
   } else {
-    prog = show::nextAlternating(showLast, showLastPhrase, SHOW_PROGRAMS, tickerOk);
+    prog = show::nextRotation(showLast, showLastPhrase, SHOW_PHRASE_COUNT, SHOW_SHIP, tickerOk);
   }
   if (prog < 0) return false;
   startShow(prog, nullptr);
   showLast = prog;
-  if (prog > 0) showLastPhrase = prog;
+  if (prog > 0 && prog <= SHOW_PHRASE_COUNT) showLastPhrase = prog;
   return true;
 }
 
@@ -712,18 +732,22 @@ static void showStatusJson(phone::Out &o) {
   long left = showRunning ? ((long)showPlayer.duration() - (long)(millis() - showStart)) / 1000 : 0;
   long next = showsPaused || showRunning || !showNextAt ? -1 : ((long)(showNextAt - millis())) / 1000;
   o.add(",\"shows\":1,\"playing\":%d,\"show\":", showRunning ? showPlaying : -1);
-  o.str(!showRunning ? "" : showPlaying == -2 ? showCustom : showPlaying == 0 ? "Spin" : SHOW_PHRASE_LIST[showPlaying - 1]);
+  o.str(!showRunning ? "" : showPlaying == -2 ? showCustom : showProgName(showPlaying));
   o.add(",\"left\":%ld,\"next\":%ld,\"paused\":%d", left < 0 ? 0 : left, next < 0 ? -1 : next, showsPaused ? 1 : 0);
 }
 
-// The phrase list, for the phone's buttons.
+// The phrase list, for the phone's buttons. The ship comes last in it (older
+// pages show her as a phrase), and "ship" says which number is hers so the
+// page can give her a button of her own: PLAY of that number plays her.
 static void showInfoJson(phone::Out &o) {
+  if (SHOW_SHIP_PROG > 0) o.add(",\"ship\":%d,\"shipLaps\":%d", SHOW_SHIP_PROG, (int)SHOW_SHIP_LAPS);
   o.add(",\"phrases\":[");
   for (int i = 0; i + 1 < SHOW_PROGRAMS; i++) {
+    const char *name = showProgName(i + 1);
     // Stop short rather than leave the list unclosed: room for this one escaped, "]" and "}".
-    if (o.room() < 2 * (int)strlen(SHOW_PHRASE_LIST[i]) + 8) { o.full = true; break; }
+    if (o.room() < 2 * (int)strlen(name) + 8) { o.full = true; break; }
     if (i) o.add(",");
-    o.str(SHOW_PHRASE_LIST[i]);
+    o.str(name);
   }
   bool fit = o.ok();
   o.full = false;
