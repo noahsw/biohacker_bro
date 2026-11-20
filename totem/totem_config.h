@@ -221,7 +221,11 @@
   "ALWAYS CHOOSE ADVENTURE", \
   "GLAD YOU'RE HERE", \
   "YOU ARE SOMEBODY'S FAVORITE MEMORY", \
-  "MAIN CHARACTER ENERGY"
+  "MAIN CHARACTER ENERGY", \
+  "PUSH THE BUTTON", \
+  "HAPPY BIRTHDAY JACK", \
+  "ABOVE & BEYOND", \
+  "THIS IS GROUP THERAPY"
 #define SHOW_SCROLL_PX_PER_S 6.0f   // scroll speed, columns a second (a letter is about 6)
 #define SHOW_REPEATS 3         // times each phrase comes round, a panel's width apart
 #define SHOW_TEXT_RGB 255, 255, 255      // text colour
