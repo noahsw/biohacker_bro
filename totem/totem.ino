@@ -27,8 +27,8 @@
   SHOW_TEST_MODE plays them back to back; SHOWS_ENABLED 0 turns them off.
 
   PHONE (phone_ble.h): a phone page over Bluetooth can scroll your own text,
-  play a show now, pause the timed shows, set the brightness and show who's
-  connected.
+  play a show now, pause the timed shows, set the brightness, turn the
+  lights off and on, and show who's connected.
 
   RING (TOTEM_RING 1, kept for later): three 16x16 panels as one 48x16 ring. Top: an EKG
   trace that sweeps round the ring and spikes on every real heartbeat, in
@@ -105,10 +105,19 @@ static void limitBrightness() {
   FastLED.setBrightness(calculate_max_brightness_for_power_mW(leds, NUM_LEDS, wheelBrightness, capMw));
 }
 
+// Lights off from the phone (POWER 0): every LED dark, Bluetooth still up so
+// the phone can turn them back on. Not saved: a reboot always comes back on.
+static bool lightsOn = true;
+static bool wakeLights = false;   // the wheel was touched while dark: on again (see loop())
+
 static int indicatorLevel = 0, indicatorCount = 0;
 static unsigned long indicatorUntil = 0;
 void showBrightnessIndicator(int level, int count, unsigned long untilMs) {
   indicatorLevel = level; indicatorCount = count; indicatorUntil = untilMs;
+  // Called on every wheel touch (even rolled against the end) and the phone's
+  // BRIGHT: either way someone wants to see it, so it's a way back on
+  // without the phone.
+  if (!lightsOn) wakeLights = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -702,6 +711,13 @@ static void phoneShowCommand(const phone::Command &c) {
   }
 }
 
+// Lights going off end the show that's on; coming back on, the next timed
+// one is a full SHOW_EVERY_MIN away rather than straight away.
+static void showsLights(bool on) {
+  if (!on && showRunning) endShow();
+  if (on) scheduleNextShow();
+}
+
 // The show half of the phone's status line.
 static void showStatusJson(phone::Out &o) {
   long left = showRunning ? ((long)showPlayer.duration() - (long)(millis() - showStart)) / 1000 : 0;
@@ -762,6 +778,8 @@ static bool showFrameDrawn() {
 }
 #else
 static inline bool showFrameDrawn() { return false; }
+static inline void showsLights(bool) {}
+static inline void sampleHrHistory() {}
 static inline void phoneShowCommand(const phone::Command &) {}
 static inline void showStatusJson(phone::Out &o) { o.add(",\"shows\":0"); }
 static inline void showInfoJson(phone::Out &o) { o.add(",\"phrases\":[]"); }
@@ -770,11 +788,24 @@ static inline void showInfoJson(phone::Out &o) { o.add(",\"phrases\":[]"); }
 // ---------------------------------------------------------------------------
 // Phone control (phone_ble.h): commands in, status out
 // ---------------------------------------------------------------------------
+static void setLights(bool on) {
+  if (on == lightsOn) return;
+  lightsOn = on;
+  showsLights(on);
+  if (!on) FastLED.clear(true);
+  Serial.printf("lights: %s\r\n", on ? "on" : "off");
+}
+
 static void handlePhone() {
   phone::Command c;
   while (phonePoll(c)) {
-    if (c.kind == phone::Command::BRIGHT) brightnessSetLevel(c.arg);
-    else phoneShowCommand(c);
+    if (c.kind == phone::Command::POWER) setLights(c.arg);
+    else if (c.kind == phone::Command::BRIGHT) brightnessSetLevel(c.arg);   // turns them on too
+    else {
+      // Playing something by hand means you want to see it.
+      if (c.kind == phone::Command::SAY || c.kind == phone::Command::PLAY) setLights(true);
+      phoneShowCommand(c);
+    }
   }
 
   // The status line a few times a second; the page reads it about once a second.
@@ -787,7 +818,7 @@ static void handlePhone() {
   for (int i = 0; i < crewCount; i++)
     o.add("%s{\"i\":\"%c\",\"on\":%d,\"bpm\":%d}", i ? "," : "", crew[i].initial,
           crew[i].connected ? 1 : 0, crew[i].connected ? crew[i].bpm : 0);
-  o.add("],\"bright\":%d", brightnessLevel());
+  o.add("],\"bright\":%d,\"power\":%d", brightnessLevel(), lightsOn ? 1 : 0);
   showStatusJson(o);
   strcat(j, "}");
   phoneSetStatus(j);
@@ -831,30 +862,39 @@ void loop() {
   bleLoop();
   handlePhone();
   updateHeartbeatPhase(currentBPM);
+  if (wakeLights) { wakeLights = false; setLights(true); }
 
+  if (!lightsOn) {
+    // Dark: nothing drawn and no shows, but the heart rate history keeps
+    // going so the show numbers are right once it's back on.
+    sampleHrHistory();
+    FastLED.clear();
+    FastLED.show();   // every frame, not once: a glitched frame doesn't stay lit
+  } else {
 #if TOTEM_ORIENTATION_TEST
-  drawOrientationTest();
-  limitBrightness();
+    drawOrientationTest();
+    limitBrightness();
 #else
 #if TOTEM_RING
-  drawRing(currentBPM, hrConnected);
-  blitRing();
-  limitBrightness();
-#else
-  if (!showFrameDrawn()) {
-    // Measure the frame with the hearts at full, then draw the real one at that
-    // brightness: the cap gives the same answer all through a beat.
-    drawAndBlitFaces(true);
+    drawRing(currentBPM, hrConnected);
+    blitRing();
     limitBrightness();
-    drawAndBlitFaces(false);
+#else
+    if (!showFrameDrawn()) {
+      // Measure the frame with the hearts at full, then draw the real one at that
+      // brightness: the cap gives the same answer all through a beat.
+      drawAndBlitFaces(true);
+      limitBrightness();
+      drawAndBlitFaces(false);
+    }
+#endif
+#endif
+    FastLED.show();   // ~23 ms for 768 LEDs (31 ms for the cube's 1024): 30+ fps
   }
-#endif
-#endif
-  FastLED.show();   // ~23 ms for 768 LEDs (31 ms for the cube's 1024): 30+ fps
 
   static unsigned long lastStatus = 0;
   if (millis() - lastStatus > 2000) {
-    Serial.printf("hr=%-9s bpm=%3d  crew=", hrConnected ? "CONNECTED" : "scanning", currentBPM);
+    Serial.printf("%shr=%-9s bpm=%3d  crew=", lightsOn ? "" : "[lights off] ", hrConnected ? "CONNECTED" : "scanning", currentBPM);
     for (int i = 0; i < crewCount; i++) Serial.printf("%c:%d ", crew[i].initial, crew[i].connected ? crew[i].bpm : 0);
     // shown: brightness actually used after the cap, out of the wheel's.
     Serial.printf(" bright=%d  shown=%d/%d  cap=%lumA%s  est_mA=%lu\r\n", brightnessLevel(),

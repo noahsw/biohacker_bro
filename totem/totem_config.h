@@ -234,7 +234,8 @@
 // --- 8. Phone control (see phone_ble.h and docs/remote/) ---
 // Open the control page in the Bluefy browser on your iPhone, tap Connect,
 // pick "Totem" and type the PIN: then you can scroll your own text, play a
-// show now, pause the shows, set the brightness and see who's connected.
+// show now, pause the shows, set the brightness, turn the lights off and on
+// and see who's connected.
 //
 // Set your PIN in secrets.h (#define PHONE_PIN "4821"). Anyone with a
 // Bluetooth app can see the totem; the PIN is what stops them driving it.

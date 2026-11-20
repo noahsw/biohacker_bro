@@ -103,6 +103,18 @@
   .switch.on { background: var(--accent); }
   .switch.on::after { left: 27px; }
 
+  /* Lights on/off */
+  .power { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; padding: 14px 16px; min-height: 64px; }
+  .power .icon { width: 36px; height: 36px; border-radius: 50%; flex: none; display: grid; place-items: center; background: var(--line); color: var(--dim); }
+  .power .icon svg { width: 20px; height: 20px; }
+  .power .label { flex: 1; }
+  .power .label b { display: block; font-size: 17px; }
+  .power.on .icon { background: var(--ok); color: #06210f; box-shadow: 0 0 14px rgba(52, 209, 122, 0.5); }
+  .power .switch { pointer-events: none; }
+  .power.on .switch { background: var(--ok); }
+  .power.on .switch::after { left: 27px; }
+  #mainView.dark .card.dims { opacity: 0.45; }
+
   .levels { display: flex; gap: 6px; }
   .levels button { flex: 1; padding: 0; font-weight: 600; }
   .levels button.sel { background: var(--text); color: var(--bg); border-color: var(--text); }
@@ -140,6 +152,14 @@
 
 <!-- Connected -->
 <section id="mainView" class="hide">
+  <div class="card hide" id="powerCard" style="padding:6px">
+    <button class="power on" id="powerBtn" role="switch" aria-checked="true" aria-label="Lights">
+      <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 3v8"/><path d="M6.3 7.2a8 8 0 1 0 11.4 0"/></svg></span>
+      <span class="label"><b id="powerLabel">Lights on</b><span class="muted" id="powerSub">Tap to turn every LED off</span></span>
+      <span class="switch"></span>
+    </button>
+  </div>
+
   <div class="card">
     <h2>Heart rates</h2>
     <div class="people" id="people"></div>
@@ -147,7 +167,7 @@
       <button id="stopBtn" class="hide">Stop</button></div>
   </div>
 
-  <div class="card">
+  <div class="card dims">
     <h2>Say something</h2>
     <form id="sayForm" autocomplete="off">
       <input id="sayText" placeholder="HAPPY BIRTHDAY SAM" enterkeyhint="send" autocapitalize="characters" spellcheck="false">
@@ -163,19 +183,19 @@
     <div class="chips" id="recent"></div>
   </div>
 
-  <div class="card">
+  <div class="card dims">
     <h2>Play now</h2>
     <div class="shows" id="shows"></div>
   </div>
 
-  <div class="card">
+  <div class="card dims">
     <div class="toggle">
       <div><div style="font-weight:600">Pause timed shows</div><div class="muted">Heart rate only. Playing by hand still works.</div></div>
       <button class="switch" id="pauseBtn" role="switch" aria-checked="false" aria-label="Pause timed shows"></button>
     </div>
   </div>
 
-  <div class="card">
+  <div class="card dims">
     <h2>Brightness</h2>
     <div class="levels" id="levels"></div>
   </div>
@@ -230,7 +250,7 @@ class Totem {
 // A totem that lives in the page, for ?demo.
 class DemoTotem {
   constructor() {
-    this.s = { auth: 0, you: { on: 1, bpm: 92 }, crew: [{ i: 'V', on: 1, bpm: 104 }], bright: 3, shows: 1, playing: -1, show: '', left: 0, next: 287, paused: 0 };
+    this.s = { auth: 0, you: { on: 1, bpm: 92 }, crew: [{ i: 'V', on: 1, bpm: 104 }], bright: 3, power: 1, shows: 1, playing: -1, show: '', left: 0, next: 287, paused: 0 };
     this.phrases = ["WE'RE ALL WE NEED", 'LIFE IS MADE OF SMALL MOMENTS LIKE THESE', 'ALWAYS CHOOSE ADVENTURE', "GLAD YOU'RE HERE", "YOU ARE SOMEBODY'S FAVORITE MEMORY", 'MAIN CHARACTER ENERGY'];
     setInterval(() => this.tick(), 1000);
   }
@@ -239,7 +259,7 @@ class DemoTotem {
     s.you.bpm = Math.max(60, Math.min(175, s.you.bpm + j()));
     s.crew[0].bpm = Math.max(60, Math.min(175, s.crew[0].bpm + j()));
     if (s.playing >= -2 && s.playing !== -1) { if (--s.left <= 0) this.end(); }
-    else if (!s.paused && --s.next <= 0) { this.play(0, null); }
+    else if (s.power && !s.paused && --s.next <= 0) { this.play(0, null); }
   }
   end() { Object.assign(this.s, { playing: -1, show: '', left: 0, next: 300 }); }
   play(n, text) { Object.assign(this.s, { playing: text ? -2 : n, show: text || (n === 0 ? 'Spin' : this.phrases[n - 1]), left: n === 0 && !text ? 8 : 70, next: -1 }); }
@@ -254,7 +274,9 @@ class DemoTotem {
     if (w === 'PLAY') this.play(+a, null);
     if (w === 'STOP') this.end();
     if (w === 'PAUSE') { this.s.paused = +a; if (+a) this.end(); else this.s.next = 300; }
-    if (w === 'BRIGHT') this.s.bright = +a;
+    if (w === 'BRIGHT') { this.s.bright = +a; this.s.power = 1; }
+    if (w === 'POWER') { this.s.power = +a; if (!+a) this.end(); else this.s.next = 300; }
+    if (w === 'SAY' || w === 'PLAY') this.s.power = 1;
   }
   async read(chr) {
     if (!this.s.auth) return { auth: 0 };
@@ -382,9 +404,19 @@ function render() {
   for (const c of s.crew || []) h += personHtml(c.i, c, '#00c8ff');
   $('people').innerHTML = h;
 
+  const hasPower = s.power !== undefined;   // older firmware doesn't have it
+  const lit = !hasPower || !!s.power;
+  $('powerCard').classList.toggle('hide', !hasPower);
+  $('powerBtn').classList.toggle('on', lit);
+  $('powerBtn').setAttribute('aria-checked', lit ? 'true' : 'false');
+  $('powerLabel').textContent = lit ? 'Lights on' : 'Lights off';
+  $('powerSub').textContent = lit ? 'Tap to turn every LED off' : 'Dark. Tap to turn back on';
+  $('mainView').classList.toggle('dark', !lit);
+
   const playing = s.shows && s.playing !== -1;
   $('stopBtn').classList.toggle('hide', !playing);
-  if (!s.shows) { $('nowLabel').textContent = 'Shows'; $('nowWhat').textContent = 'Off in this build'; }
+  if (!lit) { $('nowLabel').textContent = 'Lights off'; $('nowWhat').textContent = 'No shows while dark'; }
+  else if (!s.shows) { $('nowLabel').textContent = 'Shows'; $('nowWhat').textContent = 'Off in this build'; }
   else if (playing) { $('nowLabel').textContent = `Playing · ${fmtTime(s.left)} left`; $('nowWhat').textContent = showText(s.show); }
   else if (s.paused) { $('nowLabel').textContent = 'Timed shows'; $('nowWhat').textContent = 'Paused'; }
   else { $('nowLabel').textContent = 'Next show'; $('nowWhat').textContent = s.next >= 0 ? `in ${fmtTime(s.next)}` : '—'; }
@@ -475,6 +507,11 @@ $('pauseBtn').onclick = () => {
   const on = !(status && status.paused);
   send('PAUSE ' + (on ? 1 : 0), on ? 'Timed shows paused' : 'Timed shows back on');
   if (status) { status.paused = on ? 1 : 0; if (on) status.playing = -1; render(); }
+};
+$('powerBtn').onclick = () => {
+  const on = !(status && status.power);
+  send('POWER ' + (on ? 1 : 0), on ? 'Lights on' : 'Lights off');
+  if (status) { status.power = on ? 1 : 0; if (!on) status.playing = -1; render(); }
 };
 $('disconnectBtn').onclick = disconnect;
 

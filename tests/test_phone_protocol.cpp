@@ -24,13 +24,15 @@ int main() {
   CHECK(parse("PAUSE 1", c) && c.kind == phone::Command::PAUSE && c.arg == 1, "PAUSE 1");
   CHECK(parse("PAUSE 0", c) && c.kind == phone::Command::PAUSE && c.arg == 0, "PAUSE 0");
   CHECK(parse("BRIGHT 5", c) && c.kind == phone::Command::BRIGHT && c.arg == 5, "BRIGHT 5");
+  CHECK(parse("POWER 0", c) && c.kind == phone::Command::POWER && c.arg == 0, "POWER 0");
+  CHECK(parse("power 1\r\n", c) && c.kind == phone::Command::POWER && c.arg == 1, "power 1");
 
   // --- Typed by hand in a BLE app: lower case, line endings, extra spaces ---
   CHECK(parse("say hi there\r\n", c) && c.kind == phone::Command::SAY && !strcmp(c.text, "hi there"), "say + CRLF: '%s'", c.text);
   CHECK(parse("play   2 ", c) && c.kind == phone::Command::PLAY && c.arg == 2, "play with spaces");
 
   // --- Refused ---
-  const char *bad[] = {"", "SAY", "SAY   ", "PIN", "PLAY", "PLAY x", "PLAY -1", "PLAY 2x", "PAUSE 2",
+  const char *bad[] = {"", "SAY", "SAY   ", "PIN", "PLAY", "PLAY x", "PLAY -1", "PLAY 2x", "PAUSE 2", "POWER", "POWER 2", "POWER on", "POWERS 1",
                        "STOP now", "SAYHI", "BRIGHTNESS 3", "HELLO", "PLAY 99999"};
   for (const char *b : bad) CHECK(!parse(b, c), "accepted '%s'", b);
 

@@ -354,8 +354,15 @@ host-tested (`tests/test_show_layout.cpp`).
 ### Totem phone remote (`totem/phone_ble.cpp`, `docs/remote/`)
 
 A control page for the totem on your iPhone: scroll your own text right away,
-play the spin or a phrase now, pause the timed shows, set the brightness, and
-see whether your Whoop and friends are connected and their heart rates.
+play the spin or a phrase now, pause the timed shows, set the brightness,
+turn the lights off and on, and see whether your Whoop and friends are
+connected and their heart rates.
+
+**Lights off** blanks every LED but leaves Bluetooth running, so the phone
+can turn them back on (the board itself stays powered: unplug the battery
+for truly off). Touching the thumb wheel, picking a brightness, or playing
+something from the phone turns them back on too. It isn't saved: a reboot
+always comes back lit.
 
 **How it fits together.** Nothing goes through the internet. The totem
 advertises itself over Bluetooth as "Totem", the way a heart rate strap does,
@@ -379,7 +386,7 @@ Setup, once:
 Add `?demo` to the address to try the page without a totem.
 
 The protocol is lines of text written to one characteristic (`PIN`, `SAY`,
-`PLAY`, `STOP`, `PAUSE`, `BRIGHT`; see `totem/phone_protocol.h`), so a BLE
+`PLAY`, `STOP`, `PAUSE`, `BRIGHT`, `POWER`; see `totem/phone_protocol.h`), so a BLE
 app like LightBlue can drive the totem too. A wrong PIN costs 3 seconds; a
 phone that hasn't sent the PIN within 20 seconds is dropped, so a stranger
 can't hold the slot. The PIN goes over the air unencrypted: it keeps casual
