@@ -17,9 +17,13 @@
 //
 // The digits were 4x6 under a 10x7 heart. On the panels they read thin, and
 // 5-wide digits looked impossible: three of them with gaps make 17 px. But a
-// three-digit heart rate always starts with a 1, so the hundreds digit is a
-// 3-wide 1 and the number is 3+1+5+1+5 = 15 px. The heart gave up a row to
-// make the digits a row taller.
+// three-digit heart rate always starts with a 1, so the hundreds digit can be
+// narrow. The heart gave up a row to make the digits a row taller.
+//
+// The hundreds 1 is a single column: 1+1+5+1+5 = 13 px. With four faces side
+// by side, the gap between two numbers is 16 minus the width, whatever the
+// centring. A 3-wide 1 made it 15 px, so the gap between panels was 1 px, the
+// same as between digits, and "145 162" read as "14516 2". At 13 px it's 3 px.
 //
 // The bar is on TOP, not the bottom, because a bottom bar would sit against
 // the digits in the same colour and fuse with them. On top, a one-pixel gap
@@ -38,7 +42,7 @@ const int W = 16, H = 16;
 const int BAR_Y = 0;
 const int HEART_X = 4, HEART_Y = 2, HEART_W = 8, HEART_H = 6;
 const int DIGIT_Y = 9, DIGIT_W = 5, DIGIT_H = 7, DIGIT_GAP = 1;
-const int NARROW_W = 3;   // the hundreds 1
+const int NARROW_W = 1;   // the hundreds 1: a bare stroke
 
 static const char *const HEART[HEART_H] = {
   ".XX..XX.",
@@ -65,7 +69,7 @@ static const char *const GLYPH[12][DIGIT_H] = {
   {".XXX.", "X...X", "X...X", ".XXX.", "X...X", "X...X", ".XXX."},
   {".XXX.", "X...X", "X...X", ".XXXX", "....X", "....X", ".XXX."},
   {".....", ".....", ".....", "XXXXX", ".....", ".....", "....."},
-  {".X...", "XX...", ".X...", ".X...", ".X...", ".X...", "XXX.."},
+  {"X....", "X....", "X....", "X....", "X....", "X....", "X...."},
 };
 
 inline int glyphWidth(int g) { return g == GLYPH_NARROW_ONE ? NARROW_W : DIGIT_W; }
@@ -107,7 +111,7 @@ inline int barFill(float exact, int prev) {
 inline uint8_t visibleFloor(uint8_t b) { return (uint8_t)((256 + b) / (b + 1)); }   // ceil(256 / (b+1))
 
 // Width of a run of glyphs, and the left column that centres it on 16.
-// Odd widths (2 digits = 11, 3 = 15) round right, so "72" sits under the
+// Odd widths (2 digits = 11, 3 = 13) round right, so "72" sits under the
 // heart's centre line rather than a pixel left of it.
 inline int textWidth(const int *glyphs, int n) {
   int w = (n - 1) * DIGIT_GAP;
