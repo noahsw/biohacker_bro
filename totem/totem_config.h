@@ -173,6 +173,8 @@
 // 1: when a friend's strap is connected, two opposite faces show them with a
 // cyan heart (everything else as for you), the other two show you with a red heart. 0: all four show you.
 // Only the first connected friend is shown; the ring layout shows them all.
+// Either way, if your Whoop drops out while a friend is live, all four faces
+// show that friend.
 #ifndef CREW_FACES
 #define CREW_FACES 1
 #endif
