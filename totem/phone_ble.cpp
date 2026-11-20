@@ -92,6 +92,7 @@ CommandCallbacks commandCallbacks;
 
 void phoneSetup() {
   commands = xQueueCreate(6, sizeof(phone::Command));
+  NimBLEDevice::init("BiohackerBro");   // same name as bleSetup(); its own init is then a no-op
 
   server = NimBLEDevice::createServer();
   server->setCallbacks(&serverCallbacks, false);

@@ -798,9 +798,12 @@ void setup() {
 
   Wire.begin(MPU_SDA, MPU_SCL);   // the wheel's PCA9557 is on this bus; stepSetup() used to start it
   brightnessSetup();
-  bleSetup();
+  // Phone first: NimBLE's GATT server can only take its services before the
+  // straps' scanning and connections start (otherwise ble_svc_gap_init asserts
+  // and the board reboots in a loop).
   setPhoneInfo();
   phoneSetup();
+  bleSetup();
 }
 
 void loop() {

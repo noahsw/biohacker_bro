@@ -24,7 +24,8 @@
 // Takes one of NimBLE's connections (3 by default: your Whoop, one friend,
 // the phone). Only one phone at a time: advertising stops while one is on.
 
-// After bleSetup() (which starts NimBLE).
+// Before bleSetup(): starts NimBLE and adds the phone service, which NimBLE
+// only accepts before any scanning or connecting.
 void phoneSetup();
 
 // From loop(): the next command the unlocked phone sent, if any. Also
