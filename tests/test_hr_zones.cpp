@@ -45,7 +45,7 @@ static void checkf(bool ok, const char *fmt, ...) {
 }
 
 // --- The slices must tile the bar exactly: no gap, no overlap, nothing lost
-// to integer rounding. 64/5 is not a whole number, so this is a real risk.
+// to integer rounding. Odd widths below don't divide evenly, so this is a real risk.
 static void test_slices_tile_the_panel() {
   printf("slices tile the panel exactly\n");
   const int widths[] = {64, 32, 128, 5, 7};
@@ -142,8 +142,8 @@ static void test_rendered_width_stays_on_panel() {
 }
 
 int main() {
-  printf("hr_zones: REST=%d Z1=%d Z2=%d Z3=%d Z4=%d MAX=%d\n\n",
-         REST_BPM, ZONE1_BPM, ZONE2_BPM, ZONE3_BPM, ZONE4_BPM, ZONE_MAX_BPM);
+  printf("hr_zones: REST=%d Z1=%d Z2=%d Z3=%d MAX=%d\n\n",
+         REST_BPM, ZONE1_BPM, ZONE2_BPM, ZONE3_BPM, ZONE_MAX_BPM);
 
   test_slices_tile_the_panel();
   test_bar_is_monotonic();

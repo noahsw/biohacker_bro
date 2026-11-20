@@ -400,8 +400,8 @@ const showText = t => t.replace(/#/g, '♥');
 function render() {
   const s = status;
   setDot(true);
-  let h = personHtml('You', s.you, '#ff3b3b');
-  for (const c of s.crew || []) h += personHtml(c.i, c, '#00c8ff');
+  let h = personHtml('You', s.you, '#ff69b4');
+  for (const c of s.crew || []) h += personHtml(c.i, c, '#8200ff');
   $('people').innerHTML = h;
 
   const hasPower = s.power !== undefined;   // older firmware doesn't have it
