@@ -23,6 +23,10 @@
       out of a dark seam on one panel
   SHOW_TEST_MODE plays them back to back; SHOWS_ENABLED 0 turns them off.
 
+  PHONE (phone_ble.h): a phone page over Bluetooth can scroll your own text,
+  play a show now, pause the timed shows, set the brightness and show who's
+  connected.
+
   RING (TOTEM_RING 1, kept for later): three 16x16 panels as one 48x16 ring. Top: an EKG
   trace that sweeps round the ring and spikes on every real heartbeat, in
   your zone colour. Bottom: a ticker drifting round it, "<3 72  DON'T DIE
@@ -57,6 +61,7 @@
 #include "brightness.h"
 #include "display_ui.h"
 #include "show_layout.h"
+#include "phone_ble.h"
 #include <esp_random.h>
 
 CRGB leds[NUM_LEDS];
@@ -473,6 +478,9 @@ static int showLast = -1;
 static int showLastPhrase = 0;     // 1.. : the last phrase played, so the next turn plays the one after
 static uint8_t showBright = 255;   // the show's brightness, from its brightest frame
 static int showFriend = -1;        // the friend in this show's ticker
+static bool showsPaused = false;   // from the phone: no timed shows (playing by hand still works)
+static int showPlaying = -1;       // what's on: 0 spin, 1.. a phrase, -2 the phone's text
+static char showCustom[show::MAX_CHARS + 1];   // the phone's text, for the status line
 
 static Rgb toRgb(const CRGB &c) { return show::rgb(c.r, c.g, c.b); }
 
@@ -594,7 +602,39 @@ static void scanShowBrightness() {
                 (unsigned long)showScanMs, (unsigned long)(millis() - showStart));
 }
 
-// Starts the next show (its brightness follows, see scanShowBrightness()).
+// Starts a show now (its brightness follows, see scanShowBrightness()).
+// prog: 0 = the spin, 1.. = that phrase in SHOW_PHRASES. text: scroll this
+// instead (the phone's own text; prog is then ignored).
+static void startShow(int prog, const char *text) {
+  showFriend = CREW_FACES ? liveFriend() : -1;
+  show::People p;
+  fillPeople(p, true);
+  const char *name;
+  if (text) {
+    strlcpy(showCustom, text, sizeof(showCustom));
+    showPlayer.startPhrase(showCustom, SHOW_SCROLL_PX_PER_S, show::rgb(SHOW_TEXT_RGB), SHOW_REPEATS);
+    showPlaying = -2;
+    name = showCustom;
+  } else if (prog == 0) {
+    showPlayer.startTicker(p, SHOW_TICKER_PX_PER_S, SHOW_TICKER_NUMBERS, SHOW_SPIN_LAPS);
+    showPlaying = 0;
+    name = "ticker";
+  } else {
+    showPlayer.startPhrase(SHOW_PHRASE_LIST[prog - 1], SHOW_SCROLL_PX_PER_S, show::rgb(SHOW_TEXT_RGB), SHOW_REPEATS);
+    showPlaying = prog;
+    name = SHOW_PHRASE_LIST[prog - 1];
+  }
+
+  showScanPeople = p;
+  showScanT = showScanBestSum = showScanBestT = showScanMs = 0;
+  showScanAny = false;
+  showScanning = true;
+  showRunning = true;
+  showStart = millis();
+  Serial.printf("show: %s, %.1f s\r\n", name, showPlayer.duration() / 1000.0f);
+}
+
+// Starts the next show in the rotation.
 static bool startNextShow() {
   bool tickerOk = SHOW_TICKER && (SHOW_TEST_MODE || !SHOW_TICKER_NUMBERS || (hrConnected && currentBPM > 0));
   int prog;
@@ -606,27 +646,65 @@ static bool startNextShow() {
     prog = show::nextAlternating(showLast, showLastPhrase, SHOW_PROGRAMS, tickerOk);
   }
   if (prog < 0) return false;
-
-  showFriend = CREW_FACES ? liveFriend() : -1;
-  show::People p;
-  fillPeople(p, true);
-  if (prog == 0) {
-    showPlayer.startTicker(p, SHOW_TICKER_PX_PER_S, SHOW_TICKER_NUMBERS, SHOW_SPIN_LAPS);
-  } else {
-    showPlayer.startPhrase(SHOW_PHRASE_LIST[prog - 1], SHOW_SCROLL_PX_PER_S, show::rgb(SHOW_TEXT_RGB), SHOW_REPEATS);
-  }
-
-  showScanPeople = p;
-  showScanT = showScanBestSum = showScanBestT = showScanMs = 0;
-  showScanAny = false;
-  showScanning = true;
+  startShow(prog, nullptr);
   showLast = prog;
   if (prog > 0) showLastPhrase = prog;
-  showRunning = true;
-  showStart = millis();
-  Serial.printf("show: %s, %.1f s\r\n", prog == 0 ? "ticker" : SHOW_PHRASE_LIST[prog - 1],
-                showPlayer.duration() / 1000.0f);
   return true;
+}
+
+static void endShow() {
+  showRunning = false;
+  showPlaying = -1;
+  scheduleNextShow();   // the next timed one a full SHOW_EVERY_MIN after this
+}
+
+// The phone's show commands. Playing by hand leaves the rotation where it
+// was, and the next timed show comes SHOW_EVERY_MIN after it ends.
+static void phoneShowCommand(const phone::Command &c) {
+  switch (c.kind) {
+    case phone::Command::SAY:
+      startShow(-1, c.text);
+      break;
+    case phone::Command::PLAY:
+      if (c.arg >= 0 && c.arg < SHOW_PROGRAMS) startShow(c.arg, nullptr);
+      break;
+    case phone::Command::STOP:
+      if (showRunning) endShow();
+      break;
+    case phone::Command::PAUSE:
+      showsPaused = c.arg;
+      // Pausing is for "heart rate now", so it ends a show that's on too.
+      if (showsPaused && showRunning) endShow();
+      if (!showsPaused) scheduleNextShow();
+      Serial.printf("show: timed shows %s\r\n", showsPaused ? "paused" : "back on");
+      break;
+    default:
+      break;
+  }
+}
+
+// The show half of the phone's status line.
+static void showStatusJson(phone::Out &o) {
+  long left = showRunning ? ((long)showPlayer.duration() - (long)(millis() - showStart)) / 1000 : 0;
+  long next = showsPaused || showRunning || !showNextAt ? -1 : ((long)(showNextAt - millis())) / 1000;
+  o.add(",\"shows\":1,\"playing\":%d,\"show\":", showRunning ? showPlaying : -1);
+  o.str(!showRunning ? "" : showPlaying == -2 ? showCustom : showPlaying == 0 ? "Spin" : SHOW_PHRASE_LIST[showPlaying - 1]);
+  o.add(",\"left\":%ld,\"next\":%ld,\"paused\":%d", left < 0 ? 0 : left, next < 0 ? -1 : next, showsPaused ? 1 : 0);
+}
+
+// The phrase list, for the phone's buttons.
+static void showInfoJson(phone::Out &o) {
+  o.add(",\"phrases\":[");
+  for (int i = 0; i + 1 < SHOW_PROGRAMS; i++) {
+    // Stop short rather than leave the list unclosed: room for this one escaped, "]" and "}".
+    if (o.room() < 2 * (int)strlen(SHOW_PHRASE_LIST[i]) + 8) { o.full = true; break; }
+    if (i) o.add(",");
+    o.str(SHOW_PHRASE_LIST[i]);
+  }
+  bool fit = o.ok();
+  o.full = false;
+  o.add("]");
+  o.full = !fit;
 }
 
 // Draws this frame of a show into leds[] and sets the brightness. False when
@@ -635,13 +713,13 @@ static bool showFrameDrawn() {
   sampleHrHistory();
   if (!showNextAt) scheduleNextShow();   // first one SHOW_EVERY_MIN after power-on
   if (!showRunning) {
+    if (showsPaused) return false;
     if ((long)(millis() - showNextAt) < 0) return false;
     if (!startNextShow()) { showNextAt = millis() + 60000UL; return false; }
   }
   uint32_t t = millis() - showStart;
   if (t >= showPlayer.duration()) {
-    showRunning = false;
-    scheduleNextShow();
+    endShow();
     return false;
   }
   // The heart rate's own brightness, measured as the normal loop does (hearts
@@ -663,7 +741,46 @@ static bool showFrameDrawn() {
 }
 #else
 static inline bool showFrameDrawn() { return false; }
+static inline void phoneShowCommand(const phone::Command &) {}
+static inline void showStatusJson(phone::Out &o) { o.add(",\"shows\":0"); }
+static inline void showInfoJson(phone::Out &o) { o.add(",\"phrases\":[]"); }
 #endif
+
+// ---------------------------------------------------------------------------
+// Phone control (phone_ble.h): commands in, status out
+// ---------------------------------------------------------------------------
+static void handlePhone() {
+  phone::Command c;
+  while (phonePoll(c)) {
+    if (c.kind == phone::Command::BRIGHT) brightnessSetLevel(c.arg);
+    else phoneShowCommand(c);
+  }
+
+  // The status line a few times a second; the page reads it about once a second.
+  static unsigned long lastStatus = 0;
+  if (!phoneConnected() || millis() - lastStatus < 400) return;
+  lastStatus = millis();
+  char j[512];
+  phone::Out o(j, sizeof(j) - 1);   // room kept for the closing brace
+  o.add("{\"auth\":1,\"you\":{\"on\":%d,\"bpm\":%d},\"crew\":[", hrConnected ? 1 : 0, hrConnected ? currentBPM : 0);
+  for (int i = 0; i < crewCount; i++)
+    o.add("%s{\"i\":\"%c\",\"on\":%d,\"bpm\":%d}", i ? "," : "", crew[i].initial,
+          crew[i].connected ? 1 : 0, crew[i].connected ? crew[i].bpm : 0);
+  o.add("],\"bright\":%d", brightnessLevel());
+  showStatusJson(o);
+  strcat(j, "}");
+  phoneSetStatus(j);
+}
+
+static void setPhoneInfo() {
+  char j[512];
+  phone::Out o(j, sizeof(j) - 1);
+  o.add("{\"auth\":1,\"levels\":%d,\"max\":%d", brightnessLevelCount(), phone::MAX_TEXT);
+  showInfoJson(o);
+  if (!o.ok()) Serial.println("phone: phrase list too long for the phone, some left off its buttons");
+  strcat(j, "}");
+  phoneSetInfo(j);
+}
 
 void setup() {
   Serial.begin(115200);
@@ -681,11 +798,17 @@ void setup() {
 
   Wire.begin(MPU_SDA, MPU_SCL);   // the wheel's PCA9557 is on this bus; stepSetup() used to start it
   brightnessSetup();
+  // Phone first: NimBLE's GATT server can only take its services before the
+  // straps' scanning and connections start (otherwise ble_svc_gap_init asserts
+  // and the board reboots in a loop).
+  setPhoneInfo();
+  phoneSetup();
   bleSetup();
 }
 
 void loop() {
   bleLoop();
+  handlePhone();
   updateHeartbeatPhase(currentBPM);
 
 #if TOTEM_ORIENTATION_TEST

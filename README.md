@@ -351,6 +351,46 @@ totem): if text or faces jump between panels instead of flowing round, flip it
 (the orientation test's walking dot shows which way the chain runs). The layout and the font are
 host-tested (`tests/test_show_layout.cpp`).
 
+### Totem phone remote (`totem/phone_ble.cpp`, `docs/remote/`)
+
+A control page for the totem on your iPhone: scroll your own text right away,
+play the spin or a phrase now, pause the timed shows, set the brightness, and
+see whether your Whoop and friends are connected and their heart rates.
+
+**How it fits together.** Nothing goes through the internet. The totem
+advertises itself over Bluetooth as "Totem", the way a heart rate strap does,
+and accepts one phone connection. The page (`docs/remote/index.html`) is
+plain HTML that GitHub Pages serves; once your phone has loaded it, the
+phone's browser talks to the totem directly over Bluetooth (the Web
+Bluetooth API). GitHub only hands over the page. iPhone Safari can't do Web
+Bluetooth, so open it in the free **Bluefy** browser.
+
+Setup, once:
+
+1. In `secrets.h`, pick a PIN: `#define PHONE_PIN "4821"`. Without it the PIN
+   is `1234` and the serial log says so at boot.
+2. Flash the totem.
+3. GitHub Pages: repo Settings → Pages → Deploy from a branch → `main`,
+   folder `/docs`. The page is then at
+   `https://noahsw.github.io/biohacker_bro/remote/`.
+4. On the iPhone, install Bluefy, open that address, bookmark it. Connect,
+   pick "Totem", type the PIN (the page remembers it).
+
+Add `?demo` to the address to try the page without a totem.
+
+The protocol is lines of text written to one characteristic (`PIN`, `SAY`,
+`PLAY`, `STOP`, `PAUSE`, `BRIGHT`; see `totem/phone_protocol.h`), so a BLE
+app like LightBlue can drive the totem too. A wrong PIN costs 3 seconds; a
+phone that hasn't sent the PIN within 20 seconds is dropped, so a stranger
+can't hold the slot. The PIN goes over the air unencrypted: it keeps casual
+pranksters out, not someone sniffing Bluetooth.
+
+The phone takes one of NimBLE's 3 connections (your Whoop, one friend, the
+phone). With a second friend configured, raise `MYNEWT_VAL_BLE_MAX_CONNECTIONS`
+as `totem_config.h` section 6 describes. Settings are section 8 of
+`totem/totem_config.h`; `PHONE_ENABLED 0` turns it off. The command parser is
+host-tested (`tests/test_phone_protocol.cpp`).
+
 ## Host-side tests
 
 ```bash

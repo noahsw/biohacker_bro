@@ -221,3 +221,29 @@
 #define SHOW_SCROLL_PX_PER_S 6.0f   // scroll speed, columns a second (a letter is about 6)
 #define SHOW_REPEATS 3         // times each phrase comes round, a panel's width apart
 #define SHOW_TEXT_RGB 255, 255, 255      // text colour
+
+// --- 8. Phone control (see phone_ble.h and docs/remote/) ---
+// Open the control page in the Bluefy browser on your iPhone, tap Connect,
+// pick "Totem" and type the PIN: then you can scroll your own text, play a
+// show now, pause the shows, set the brightness and see who's connected.
+//
+// Set your PIN in secrets.h (#define PHONE_PIN "4821"). Anyone with a
+// Bluetooth app can see the totem; the PIN is what stops them driving it.
+//
+// The phone takes one of NimBLE's connections: 3 by default, so you, one
+// friend and the phone. With a second friend in CREW_MAC_*, raise
+// MYNEWT_VAL_BLE_MAX_CONNECTIONS (section 6) or the phone and that friend
+// compete for the last slot.
+#ifndef PHONE_ENABLED
+#define PHONE_ENABLED 1
+#endif
+#ifndef PHONE_PIN
+#define PHONE_PIN "1234"
+#endif
+#define PHONE_NAME "Totem"
+#define PHONE_UNLOCK_S 20      // a phone that hasn't sent the PIN by then is disconnected
+// The page has the same UUIDs (docs/remote/index.html).
+#define PHONE_SERVICE_UUID "b10ac0de-0001-4e0f-8a5e-746f74656d21"
+#define PHONE_COMMAND_UUID "b10ac0de-0002-4e0f-8a5e-746f74656d21"
+#define PHONE_STATUS_UUID  "b10ac0de-0003-4e0f-8a5e-746f74656d21"
+#define PHONE_INFO_UUID    "b10ac0de-0004-4e0f-8a5e-746f74656d21"
