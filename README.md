@@ -327,6 +327,30 @@ python3 tools/serial_monitor.py /dev/cu.usbmodem201101 15   # names each step
 If nothing lights, the data wire is probably on the wrong HUB75 pin. The header
 carries no power, so moving it to another pin can't damage anything.
 
+### Totem shows (`totem/show_layout.h`)
+
+Every 5 minutes the totem's heart rate steps aside for one show. The spin and
+the messages take turns, so each comes round every 10 minutes, and each message
+turn plays the next phrase in `SHOW_PHRASES`:
+
+- **Spin:** the four faces spin round the ring twice (about 8 seconds), then
+  bump into place and the zone bars flash. `SHOW_TICKER_NUMBERS 1` adds a stock
+  ticker of your and your friend's heart rates racing past between them.
+- **Messages:** the phrase scrolls the whole way round the ring three times in
+  thin 7 px capitals, at a steady 6 columns a second (1 to 2 minutes). One
+  panel is the seam: the letters fade in out of one side of it, its middle
+  stays dark so the crowd can see where the line starts, and they fade out into
+  its other side.
+
+Settings are section 7 of `totem/totem_config.h`. `SHOW_TEST_MODE 1` plays
+every show back to back with 4 seconds of heart rate between, to check them
+before a night out; `SHOWS_ENABLED 0` turns them off. Each show runs at one
+steady brightness, worked out at its start from its brightest frame so it stays
+under `LED_MAX_MA`. Both shows need `RING_REVERSE` right (it's 1 on this
+totem): if text or faces jump between panels instead of flowing round, flip it
+(the orientation test's walking dot shows which way the chain runs). The layout and the font are
+host-tested (`tests/test_show_layout.cpp`).
+
 ## Host-side tests
 
 ```bash
@@ -336,7 +360,7 @@ make -C tests
 Compiles with a plain `c++` — no Arduino toolchain, no board attached — and
 runs in CI on every PR (`.github/workflows/tests.yml`).
 
-**What's tested, and why only this.** Only `hr_zones.cpp`: the BPM-to-zone and
+**What's tested, and why only this.** Mainly `hr_zones.cpp`: the BPM-to-zone and
 zone-to-pixel math. That's the one part of this firmware that can be wrong
 without *looking* wrong — a bar of the wrong length is still a plausible bar.
 Everything else is I/O against hardware that can't be exercised off-device,

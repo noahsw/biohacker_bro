@@ -13,6 +13,16 @@
   on their beats; bar, number and colours otherwise the same as yours. If your
   Whoop drops out while a friend is live, all four faces show the friend.
 
+  SHOWS (faces layout): every 5 minutes the heart rate steps aside for one
+  show, the spin and the messages taking turns, the messages in order
+  (show_layout.h):
+    - spin: the faces spin round the ring a couple of times, then lock back in
+      (SHOW_TICKER_NUMBERS 1 adds a stock ticker of your and your friend's
+      heart rates racing past)
+    - messages: a phrase scrolls round the ring three times, fading in and
+      out of a dark seam on one panel
+  SHOW_TEST_MODE plays them back to back; SHOWS_ENABLED 0 turns them off.
+
   RING (TOTEM_RING 1, kept for later): three 16x16 panels as one 48x16 ring. Top: an EKG
   trace that sweeps round the ring and spikes on every real heartbeat, in
   your zone colour. Bottom: a ticker drifting round it, "<3 72  DON'T DIE
@@ -46,6 +56,8 @@
 #include "ring_layout.h"
 #include "brightness.h"
 #include "display_ui.h"
+#include "show_layout.h"
+#include <esp_random.h>
 
 CRGB leds[NUM_LEDS];
 
@@ -435,13 +447,223 @@ static void drawOrientationTest() {
     for (int y = 0; y < face::H; y++)
       for (int x = 0; x < face::W; x++) leds[ledIndex(f, x, y)] = faceBuf[y][x];
   }
-#if TOTEM_RING
-  // A white dot walking along the bottom row, column 0 to 47, once a second
-  // per panel. If it jumps backwards at a panel seam, set RING_REVERSE.
+  // A white dot walking along the bottom row round the ring (column 0 to 47,
+  // or 63 with four panels), about a second per panel. It should move right
+  // across each face (seen from outside) and carry straight on into the next
+  // panel. If it jumps backwards at a panel seam, set RING_REVERSE. The
+  // ticker spin needs this right; the faces don't care.
   int dot = (int)((millis() / 60) % RING_COLS);
   leds[ringLedIndex(dot, face::H - 1)] = CRGB::White;
-#endif
 }
+
+// ---------------------------------------------------------------------------
+// Shows: the spin and the scrolling messages (show_layout.h)
+// ---------------------------------------------------------------------------
+#if SHOWS_ENABLED && !TOTEM_RING
+static_assert(RING_COLS == show::COLS, "shows are laid out for four 16x16 panels");
+static const char *const SHOW_PHRASE_LIST[] = {SHOW_PHRASES};
+static const int SHOW_PROGRAMS = 1 + (int)(sizeof(SHOW_PHRASE_LIST) / sizeof(SHOW_PHRASE_LIST[0]));   // 0 = ticker
+
+static show::Player showPlayer;
+static show::Frame showNormal, showFrame;
+static show::HrHistory hrHist[1 + CREW_MAX];   // 0 = you, 1.. = crew slots
+static bool showRunning = false;
+static unsigned long showStart = 0, showNextAt = 0, hrHistAt = 0;
+static int showLast = -1;
+static int showLastPhrase = 0;     // 1.. : the last phrase played, so the next turn plays the one after
+static uint8_t showBright = 255;   // the show's brightness, from its brightest frame
+static int showFriend = -1;        // the friend in this show's ticker
+
+static Rgb toRgb(const CRGB &c) { return show::rgb(c.r, c.g, c.b); }
+
+// Ring column block k (16 columns, left to right seen from outside) is chain
+// panel ringBlockPanel(k): ringLedIndex() puts it there.
+static int ringBlockPanel(int k) { return RING_REVERSE ? FACE_COUNT - 1 - k : k; }
+
+// Copies faceBuf into the ring blocks showing you (even panels), your friend
+// (odd panels) or, with who < 0, all of them.
+static void faceToRing(show::Frame &ring, int who) {
+  for (int k = 0; k < FACE_COUNT; k++) {
+    int panel = ringBlockPanel(k);
+    if (who >= 0 && panel % 2 != who) continue;
+    for (int y = 0; y < face::H; y++)
+      for (int x = 0; x < face::W; x++) ring[y][k * face::W + x] = toRgb(faceBuf[y][x]);
+  }
+}
+
+// The heart rate display as the ring shows it now: the same faces, the same
+// sides, as drawAndBlitFaces().
+static void drawNormalRing(bool peak, show::Frame &ring) {
+  static int youFill = 0, friendFill = 0;
+  drawFace(currentBPM, hrConnected, peak, HEART_RGB_YOU, lastBeatTime, youFill);
+  int fr = CREW_FACES ? liveFriend() : -1;
+  if (fr < 0) { friendLastBeat = millis(); faceToRing(ring, -1); return; }
+  faceToRing(ring, 0);
+  if (!peak) advanceBeat(crew[fr].bpm, friendLastBeat, friendBeatCount);   // once per frame
+  drawFace(crew[fr].bpm, true, peak, HEART_RGB_FRIEND, friendLastBeat, friendFill);
+  faceToRing(ring, 1);
+}
+
+static void blitShowFrame(const show::Frame &f) {
+  for (int y = 0; y < show::ROWS; y++)
+    for (int x = 0; x < show::COLS; x++) leds[ringLedIndex(x, y)] = CRGB(f[y][x].r, f[y][x].g, f[y][x].b);
+}
+
+// You, and the friend on the faces (if any), for the ticker.
+static void fillPeople(show::People &p, bool peak) {
+  p.count = 1;
+  p.bpm[0] = currentBPM;
+  p.live[0] = hrConnected && currentBPM > 0;
+  p.deltaKnown[0] = hrHist[0].delta(p.live[0] ? currentBPM : 0, p.delta[0]);
+  p.zone[0] = toRgb(zoneRgb(currentBPM));
+  p.heart[0] = toRgb(HEART_RGB_YOU);
+  p.beat[0] = peak ? 1.0f : beatIntensity();
+  int fr = showFriend;
+  if (fr >= 0 && fr < crewCount) {
+    p.count = 2;
+    p.bpm[1] = crew[fr].bpm;
+    p.live[1] = crew[fr].connected && crew[fr].bpm > 0;
+    p.deltaKnown[1] = hrHist[1 + fr].delta(p.live[1] ? crew[fr].bpm : 0, p.delta[1]);
+    p.zone[1] = toRgb(zoneRgb(crew[fr].bpm));
+    p.heart[1] = toRgb(HEART_RGB_FRIEND);
+    p.beat[1] = peak ? 1.0f : beatIntensityAt(friendLastBeat);
+  }
+}
+
+// Everyone's heart rate every 20 s, for the ticker's 10-minute arrows.
+static void sampleHrHistory() {
+  if (hrHistAt && millis() - hrHistAt < show::HrHistory::SAMPLE_MS) return;
+  hrHistAt = millis();
+  hrHist[0].push(hrConnected ? currentBPM : 0);
+  for (int i = 0; i < crewCount && i < CREW_MAX; i++)
+    hrHist[1 + i].push(crew[i].connected ? crew[i].bpm : 0);
+}
+
+static void scheduleNextShow() {
+  showNextAt = millis() + (SHOW_TEST_MODE ? SHOW_TEST_GAP_S * 1000UL : SHOW_EVERY_MIN * 60000UL);
+}
+
+// The show's brightness: the dimmest that any of its frames needs to stay
+// under LED_MAX_MA, so the whole show runs at one steady level instead of
+// pumping as letters come and go. Worked out a few milliseconds per frame over
+// the show's first second or so (doing it all at once froze the display for
+// up to 0.3 s on the longest phrase): it looks for the brightest frame by
+// summing its channels, then runs FastLED's power estimate on that one alone.
+// A show is one colour (the text) or the same faces shifted round (the spin),
+// so the biggest sum is the frame that needs the lowest brightness. Until it's
+// done the show runs at the heart rate's brightness, which is right for the
+// spin (the same faces) and near enough for a phrase (black, then its first
+// letters dim in the seam's fade; the scan only needs the first pass and a
+// bit, Player::scanEnd(), and takes well under a second).
+static const uint32_t SHOW_SCAN_BUDGET_MS = 6;   // per frame (of ~33)
+static bool showScanning = false;
+static uint32_t showScanT = 0, showScanBestSum = 0, showScanBestT = 0, showScanMs = 0;
+static bool showScanAny = false;
+static show::People showScanPeople;
+
+static void scanShowBrightness() {
+  if (!showScanning) return;
+  const uint32_t start = millis();
+  while (showScanT < showPlayer.scanEnd() && millis() - start < SHOW_SCAN_BUDGET_MS) {
+    uint32_t t = showScanT;
+    showScanT += 80;
+    if (showPlayer.render(t, showNormal, showScanPeople, showFrame) <= 0) continue;
+    uint32_t sum = 0;
+    for (int y = 0; y < show::ROWS; y++)
+      for (int x = 0; x < show::COLS; x++) sum += showFrame[y][x].r + showFrame[y][x].g + showFrame[y][x].b;
+    if (!showScanAny || sum > showScanBestSum) { showScanBestSum = sum; showScanBestT = t; showScanAny = true; }
+  }
+  showScanMs += millis() - start;
+  if (showScanT < showPlayer.scanEnd()) return;
+  // Same cap as limitBrightness(): the lower USB one while a computer is
+  // plugged in, if this build has it (LED_MAX_MA_USB_HOST).
+#ifdef LED_MAX_MA_USB_HOST
+  const uint32_t capMw = (uint32_t)ledCapMa() * 5;
+#else
+  const uint32_t capMw = (uint32_t)LED_MAX_MA * 5;
+#endif
+  uint8_t b = wheelBrightness;
+  if (showScanAny) {
+    showPlayer.render(showScanBestT, showNormal, showScanPeople, showFrame);
+    blitShowFrame(showFrame);
+    b = calculate_max_brightness_for_power_mW(leds, NUM_LEDS, wheelBrightness, capMw);
+  }
+  showBright = b;
+  showScanning = false;
+  Serial.printf("show: brightness %d/%d, worked out in %lu ms over %lu ms\r\n", showBright, wheelBrightness,
+                (unsigned long)showScanMs, (unsigned long)(millis() - showStart));
+}
+
+// Starts the next show (its brightness follows, see scanShowBrightness()).
+static bool startNextShow() {
+  bool tickerOk = SHOW_TICKER && (SHOW_TEST_MODE || !SHOW_TICKER_NUMBERS || (hrConnected && currentBPM > 0));
+  int prog;
+  if (SHOW_TEST_MODE) {
+    prog = show::nextInOrder(showLast, SHOW_PROGRAMS);
+    if (prog == 0 && !SHOW_TICKER) prog = show::nextInOrder(prog, SHOW_PROGRAMS);
+    if (prog == 0 && !SHOW_TICKER) prog = -1;
+  } else {
+    prog = show::nextAlternating(showLast, showLastPhrase, SHOW_PROGRAMS, tickerOk);
+  }
+  if (prog < 0) return false;
+
+  showFriend = CREW_FACES ? liveFriend() : -1;
+  show::People p;
+  fillPeople(p, true);
+  if (prog == 0) {
+    showPlayer.startTicker(p, SHOW_TICKER_PX_PER_S, SHOW_TICKER_NUMBERS, SHOW_SPIN_LAPS);
+  } else {
+    showPlayer.startPhrase(SHOW_PHRASE_LIST[prog - 1], SHOW_SCROLL_PX_PER_S, show::rgb(SHOW_TEXT_RGB), SHOW_REPEATS);
+  }
+
+  showScanPeople = p;
+  showScanT = showScanBestSum = showScanBestT = showScanMs = 0;
+  showScanAny = false;
+  showScanning = true;
+  showLast = prog;
+  if (prog > 0) showLastPhrase = prog;
+  showRunning = true;
+  showStart = millis();
+  Serial.printf("show: %s, %.1f s\r\n", prog == 0 ? "ticker" : SHOW_PHRASE_LIST[prog - 1],
+                showPlayer.duration() / 1000.0f);
+  return true;
+}
+
+// Draws this frame of a show into leds[] and sets the brightness. False when
+// no show is on: the heart rate draws as usual.
+static bool showFrameDrawn() {
+  sampleHrHistory();
+  if (!showNextAt) scheduleNextShow();   // first one SHOW_EVERY_MIN after power-on
+  if (!showRunning) {
+    if ((long)(millis() - showNextAt) < 0) return false;
+    if (!startNextShow()) { showNextAt = millis() + 60000UL; return false; }
+  }
+  uint32_t t = millis() - showStart;
+  if (t >= showPlayer.duration()) {
+    showRunning = false;
+    scheduleNextShow();
+    return false;
+  }
+  // The heart rate's own brightness, measured as the normal loop does (hearts
+  // at their peak), for the fades in and out.
+  drawNormalRing(true, showNormal);
+  blitShowFrame(showNormal);
+  limitBrightness();
+  uint8_t normalBright = FastLED.getBrightness();
+  scanShowBrightness();   // wants the hearts at their peak too; uses showFrame and leds as scratch
+  drawNormalRing(false, showNormal);
+
+  show::People p;
+  fillPeople(p, false);
+  float mix = showPlayer.render(t, showNormal, p, showFrame);
+  if (showScanning) mix = 0;   // not worked out yet: the heart rate's brightness
+  blitShowFrame(showFrame);
+  FastLED.setBrightness((uint8_t)(normalBright + (showBright - normalBright) * mix + 0.5f));
+  return true;
+}
+#else
+static inline bool showFrameDrawn() { return false; }
+#endif
 
 void setup() {
   Serial.begin(115200);
@@ -475,11 +697,13 @@ void loop() {
   blitRing();
   limitBrightness();
 #else
-  // Measure the frame with the hearts at full, then draw the real one at that
-  // brightness: the cap gives the same answer all through a beat.
-  drawAndBlitFaces(true);
-  limitBrightness();
-  drawAndBlitFaces(false);
+  if (!showFrameDrawn()) {
+    // Measure the frame with the hearts at full, then draw the real one at that
+    // brightness: the cap gives the same answer all through a beat.
+    drawAndBlitFaces(true);
+    limitBrightness();
+    drawAndBlitFaces(false);
+  }
 #endif
 #endif
   FastLED.show();   // ~23 ms for 768 LEDs (31 ms for the cube's 1024): 30+ fps
