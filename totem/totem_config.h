@@ -221,3 +221,31 @@
 #define SHOW_SCROLL_PX_PER_S 6.0f   // scroll speed, columns a second (a letter is about 6)
 #define SHOW_REPEATS 3         // times each phrase comes round, a panel's width apart
 #define SHOW_TEXT_RGB 255, 255, 255      // text colour
+
+// --- 8. Beat drop: the board's mics flash the ring on a drop ---
+// The board's two mics listen to the bass. When it has been gone for a while
+// (a breakdown and build) and then slams back in, the ring gets a ~2.6 s burst
+// over whatever it's showing: one white flash, rainbow shock bands, then
+// spinning rainbow stripes that fade back to the heart rate. It learns the
+// room by itself (living room or festival), and turns the mic gain down if it
+// clips. At most one burst every DROP_COOLDOWN_S. See audio_drop.h.
+//
+// OFF by default: 0 leaves the mics unpowered and changes nothing.
+// DROP_TEST_MODE 1 shows a sound meter instead of the heart rate (the drops
+// still burst over it) and logs the levels to serial 4 times a second; see
+// drop_fx.h for how to read the meter.
+#ifndef DROP_ENABLED
+#define DROP_ENABLED 0
+#endif
+#ifndef DROP_TEST_MODE
+#define DROP_TEST_MODE 0
+#endif
+#define DROP_MIC_GAIN_DB   12    // starting mic gain, 0-33 in 3s; auto-adjusts from here
+#define DROP_AUTO_GAIN     1     // 0 = keep DROP_MIC_GAIN_DB fixed
+#define DROP_GAIN_MIN_DB   0
+#define DROP_GAIN_MAX_DB   33
+#define DROP_QUIET_DB      9     // bass this far under its usual level = bass is out
+#define DROP_BUILD_MIN_S   5     // bass out at least this long before a drop counts
+#define DROP_JUMP_DB       10    // the drop: bass jumps back at least this much, fast
+#define DROP_COOLDOWN_S    90    // no second burst for this long
+#define DROP_MIN_LEVEL_DB  -80   // usual bass must be above this (dB, gain taken off): ignores a quiet room

@@ -351,6 +351,37 @@ totem): if text or faces jump between panels instead of flowing round, flip it
 (the orientation test's walking dot shows which way the chain runs). The layout and the font are
 host-tested (`tests/test_show_layout.cpp`).
 
+### Totem beat drop (`totem/audio_drop.cpp`, off by default)
+
+The board's two mics listen to the bass (about 40-150 Hz, the kick and bass
+line). A drop is the bass gone for at least 5 s while the music carries on (a
+breakdown and build), then back within 0.7 s, 10 dB or more above where the
+breakdown sat. On a drop the ring gets a 2.6 s burst over whatever it's
+showing: one white flash (no strobing), rainbow shock bands out to the top and
+bottom edges, then spinning rainbow stripes that fade back. At most one every
+90 s.
+
+It calibrates itself: the "usual" bass level is the 75th percentile of the
+last minute, learned only while the bass is in, so a long breakdown doesn't
+become the new normal and the same settings work in a living room and at a
+festival. Levels are measured net of the mic gain, which steps down 3 dB a
+second while the mic clips and up after 20 quiet seconds. Silence (between
+sets) isn't a breakdown, and bass fading back in slowly isn't a drop.
+
+The mics are on the **ES7210** (I2C 0x40), not the ES8311 (0x18, the speaker
+side). Audio power comes from a regulator switched by the PCA9557's IO5, off
+at power-up, so the firmware switches it on (read-modify-write, the wheel's
+pins untouched). I2S: MCLK IO38, BCLK IO48, LRCK IO21, ES7210 SDOUT1 IO47,
+16 kHz, 16-bit stereo. From the board maker's schematic; not yet run on the
+board.
+
+Settings are section 8 of `totem/totem_config.h`. `DROP_ENABLED 0` (the
+default) leaves the mics unpowered and changes nothing. `DROP_TEST_MODE 1`
+shows a sound meter on all four faces instead of the heart rate and logs the
+levels 4 times a second; `drop_fx.h` explains the meter. `dropSetEnabled()`
+turns it on or off at run time. The detector and drawings are host-tested
+against a synthetic trance track (`tests/test_drop_detect.cpp`).
+
 ## Host-side tests
 
 ```bash

@@ -57,6 +57,7 @@
 #include "brightness.h"
 #include "display_ui.h"
 #include "show_layout.h"
+#include "audio_drop.h"
 #include <esp_random.h>
 
 CRGB leds[NUM_LEDS];
@@ -682,6 +683,7 @@ void setup() {
   Wire.begin(MPU_SDA, MPU_SCL);   // the wheel's PCA9557 is on this bus; stepSetup() used to start it
   brightnessSetup();
   bleSetup();
+  dropSetup();   // beat drop: does nothing unless DROP_ENABLED or DROP_TEST_MODE
 }
 
 void loop() {
@@ -706,6 +708,9 @@ void loop() {
   }
 #endif
 #endif
+#if !TOTEM_ORIENTATION_TEST && !TOTEM_RING
+  dropDraw(leds, wheelBrightness, ledCapMa() * 5);   // the burst after a drop (off unless DROP_ENABLED)
+#endif
   FastLED.show();   // ~23 ms for 768 LEDs (31 ms for the cube's 1024): 30+ fps
 
   static unsigned long lastStatus = 0;
@@ -717,6 +722,7 @@ void loop() {
                   FastLED.getBrightness(), wheelBrightness,
                   (unsigned long)ledCapMa(), usbHostAttached() ? "(usb)" : "",
                   (unsigned long)calculate_unscaled_power_mW(leds, NUM_LEDS) / 5);
+    dropPrintStatus();
     lastStatus = millis();
   }
   brightnessWait(2);
