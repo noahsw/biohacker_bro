@@ -177,22 +177,31 @@ int main() {
   }
 
   // --- Scheduler ---
-  // Festival mode: spin, 1, spin, 2, spin, 3, spin, 1, ...
+  // Festival mode: spin, 1, ship, spin, 2, ship, spin, 3, ship, spin, 1, ...
   {
-    const int count = 4;
+    const int phrases = 3, SHIP = 4;
     int last = -1, lastPhrase = 0;
-    const int want[] = {0, 1, 0, 2, 0, 3, 0, 1, 0, 2};
-    for (int k = 0; k < 10; k++) {
-      int p = show::nextAlternating(last, lastPhrase, count, true);
-      CHECK(p == want[k], "alternating show %d: got %d, wanted %d", k, p, want[k]);
-      last = p; if (p > 0) lastPhrase = p;
+    const int want[] = {0, 1, SHIP, 0, 2, SHIP, 0, 3, SHIP, 0, 1, SHIP};
+    for (int k = 0; k < 12; k++) {
+      int p = show::nextRotation(last, lastPhrase, phrases, true, true);
+      CHECK(p == want[k], "rotation show %d: got %d, wanted %d", k, p, want[k]);
+      last = p; if (p >= 1 && p <= phrases) lastPhrase = p;
     }
-    // No spin (or it can't play): the phrases in turn, picking up where they were.
-    CHECK(show::nextAlternating(0, 2, count, false) == 3, "no spin after phrase 2: phrase 3");
-    CHECK(show::nextAlternating(3, 3, count, false) == 1, "no spin after phrase 3: phrase 1");
-    CHECK(show::nextAlternating(-1, 0, 1, true) == 0, "no phrases: spin");
-    CHECK(show::nextAlternating(-1, 0, 1, false) == -1, "no phrases, no spin: nothing");
-    CHECK(show::nextAlternating(1, 1, 2, true) == 0 && show::nextAlternating(0, 1, 2, true) == 1, "one phrase: spin, phrase");
+    // No ship: spin and phrases take turns.
+    CHECK(show::nextRotation(0, 0, phrases, false, true) == 1, "no ship: spin, phrase 1");
+    CHECK(show::nextRotation(1, 1, phrases, false, true) == 0, "no ship: phrase 1, spin");
+    // No spin (or it can't play): phrase, ship, phrase, ship.
+    CHECK(show::nextRotation(-1, 0, phrases, true, false) == 1, "no spin: phrase 1 first");
+    CHECK(show::nextRotation(1, 1, phrases, true, false) == SHIP, "no spin: phrase 1, ship");
+    CHECK(show::nextRotation(SHIP, 1, phrases, true, false) == 2, "no spin: ship, phrase 2");
+    CHECK(show::nextRotation(SHIP, 3, phrases, true, false) == 1, "no spin: ship, phrases wrap");
+    // No phrases: spin, ship.
+    CHECK(show::nextRotation(0, 0, 0, true, true) == 1, "no phrases: spin, ship (1 when there are no phrases)");
+    CHECK(show::nextRotation(1, 0, 0, true, true) == 0, "no phrases: ship, spin");
+    // Only one kind can play: it repeats. Nothing: -1.
+    CHECK(show::nextRotation(0, 0, 0, false, true) == 0, "spin only");
+    CHECK(show::nextRotation(SHIP, 0, 0, true, false) == 1, "ship only (program 1 with no phrases)");
+    CHECK(show::nextRotation(-1, 0, 0, false, false) == -1, "nothing to play");
   }
   { int p = -1, seen = 0; for (int k = 0; k < 8; k++) { p = show::nextInOrder(p, 4); seen |= 1 << p; } CHECK(seen == 15, "test mode skips a show"); }
 
@@ -218,17 +227,24 @@ int main() {
       CHECK(pl.render(100, normal, p, frame) == 0, "ship: heart rate's brightness while it fades out");
       CHECK(pl.render(sh.blackAt + 50, normal, p, frame) == 1 && count(frame, false) == 0, "ship: dark before the heart rate");
       CHECK(pl.render(d - 1, normal, p, frame) == 0, "ship: heart rate's brightness while it fades in");
-      // Under way, all three red funnels show (3 by 3 each, under black tops).
+      // Under way, all three red funnels show (3 wide by 4 tall each, under black tops).
       for (uint32_t t = show::SHIP_IN_AT + show::SHIP_IN_MS; t < sh.outAt; t += 997) {
         pl.render(t, normal, p, frame);
         int red = count(frame, true);
-        CHECK(red == 27, "ship at %u ms: %d funnel pixels", t, red);
+        CHECK(red == 36, "ship at %u ms: %d funnel pixels", t, red);
       }
       CHECK(sh.pos(sh.outAt) - sh.pos(show::SHIP_IN_AT + show::SHIP_IN_MS) >= show::COLS - 0.5f, "ship: a full lap in view");
       for (int i = 0; i < show::SHIP_STARS; i++) CHECK(sh.starY[i] >= 0 && sh.starY[i] < show::WATER_Y, "star in the sea");
     }
     pl.startShip(7, 1.0f);  CHECK(pl.duration() > 60000, "slow ship");
     pl.startShip(7, 12.0f); CHECK(pl.duration() < 12000, "fast ship");
+    {
+      pl.startShip(7, 4.0f, 3);
+      const show::Ship &sh = pl.ship;
+      CHECK(pl.duration() > 50000 && pl.duration() < 56000, "three-lap ship lasts %u ms", pl.duration());
+      float laps = (sh.pos(sh.outAt) - sh.pos(show::SHIP_IN_AT + show::SHIP_IN_MS)) / show::COLS;
+      CHECK(laps >= 2.97f && laps <= 3.03f, "three-lap ship goes round %.2f times", laps);
+    }
   }
 
   // --- Heart rate history ---

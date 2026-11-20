@@ -329,9 +329,9 @@ carries no power, so moving it to another pin can't damage anything.
 
 ### Totem shows (`totem/show_layout.h`)
 
-Every 5 minutes the totem's heart rate steps aside for one show. The spin and
-the messages take turns, so each comes round every 10 minutes, and each message
-turn plays the next phrase in `SHOW_PHRASES`:
+Every 5 minutes the totem's heart rate steps aside for one show. Three turns go
+round: the spin, a message, then the Queen Mary, so each comes round every 15
+minutes, and each message turn plays the next phrase in `SHOW_PHRASES`:
 
 - **Spin:** the four faces spin round the ring twice (about 8 seconds), then
   bump into place and the zone bars flash. `SHOW_TICKER_NUMBERS 1` adds a stock
@@ -341,6 +341,9 @@ turn plays the next phrase in `SHOW_PHRASES`:
   panel is the seam: the letters fade in out of one side of it, its middle
   stays dark so the crowd can see where the line starts, and they fade out into
   its other side.
+- **Queen Mary:** a night sea with twinkling stars fades in and a three-funnel
+  liner sails round the ring `SHOW_SHIP_LAPS` times (3, about 53 seconds), her
+  wake behind her, then fades away. `SHOW_SHIP 0` turns her off.
 
 Settings are section 7 of `totem/totem_config.h`. `SHOW_TEST_MODE 1` plays
 every show back to back with 4 seconds of heart rate between, to check them

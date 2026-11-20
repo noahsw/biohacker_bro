@@ -29,7 +29,8 @@
 //
 // QUEEN MARY
 //   The heart rate fades out, a night sea fades in, and a three-funnel liner
-//   sails once round the ring past the moon, then fades away. See Ship below.
+//   sails round the ring under the stars (SHOW_SHIP_LAPS times), then fades
+//   away. See Ship below.
 
 #include <stdint.h>
 #include <math.h>
@@ -317,11 +318,11 @@ struct Ticker {
 // Ship (a Queen Mary style liner sailing round the ring at night)
 // ---------------------------------------------------------------------------
 // The heart rate fades out and a night sea fades in: dark sky with a few
-// twinkling stars and a moon, and slow rolling water on the bottom four rows
-// with the moon glittering on it. Out of the dark comes the ship: black hull
+// twinkling stars, and slow rolling water on the bottom four rows. (No
+// moon: at this size it was just a blob.) Out of the dark comes the ship: black hull
 // with a row of lit portholes and a red waterline, white decks with warm
-// windows, three red funnels with black tops and two masts. She sails one
-// full lap of the ring at a stately pace, a bow wave at the front and a wake
+// windows, three upright red funnels with black tops and two masts. She sails
+// round the ring (laps times) at a stately pace, a bow wave at the front and a wake
 // that grows behind her, her lit windows reflected in the water. Then she fades into the dark, the sea goes, and
 // the heart rate fades back in.
 
@@ -330,11 +331,11 @@ struct Ticker {
 //   y window  F funnel  B funnel top  M mast
 static const char *const SHIP_ART[] = {
   ".......................M......",
-  "....M..................M......",
   "....M..BBB..BBB..BBB...M......",
   "....M..FFF..FFF..FFF...M......",
-  "....M...FFF..FFF..FFF..M......",
-  "....M...FFF..FFF..FFF..M......",
+  "....M..FFF..FFF..FFF...M......",
+  "....M..FFF..FFF..FFF...M......",
+  "....M..FFF..FFF..FFF...M......",
   "....wWWWWWWWWWWWWWWWWWWWw.....",
   "...WWyWyWyWyWyWyWyWyWyWyWWw...",
   "KKKKKKKKKKKKKKKKKKKKKKKKKKKKKK",
@@ -344,7 +345,7 @@ static const char *const SHIP_ART[] = {
 };
 const int SHIP_H = 12, SHIP_W = 30;
 const int WATER_Y = 12;           // water on rows 12..15
-const int SHIP_FUNNEL_X[3] = {7, 12, 17};   // funnel tops (row 2), left edge
+const int SHIP_FUNNEL_X[3] = {7, 12, 17};   // funnels (upright, rows 1..5), left edge
 
 static const int8_t SHIP_LIGHTS[2][4] = {{29, 8, 23, 0}, {4, 1, 0, 8}};
 
@@ -389,30 +390,27 @@ struct ShipPx { Rgb c; float a; };   // a ship pixel and how solid it is
 struct Ship {
   float startCol, pxPerS;
   uint32_t seed;
-  int moonCol;
   int8_t starX[SHIP_STARS], starY[SHIP_STARS];
   uint32_t lapAt, outAt, blackAt, fadeInAt, endAt;
 
-  void build(uint32_t seed_, float pxPerS_) {
+  void build(uint32_t seed_, float pxPerS_, int laps = 1) {
     seed = seed_;
     Rng rng(seed);
     pxPerS = pxPerS_ < 1 ? 1 : pxPerS_;
     startCol = (float)rng.range(0, COLS - 1);
-    // The moon sits where she'll pass in front of it in the first half lap.
-    moonCol = wrapCol((int)startCol + SHIP_W + rng.range(4, 14));
     for (int i = 0; i < SHIP_STARS; i++) {
       int x, y, tries = 0;
       do {
         x = rng.range(0, COLS - 1); y = rng.range(0, 7);
-        int dx = wrapCol(x - moonCol + COLS / 2) - COLS / 2;
-        bool clash = dx >= -3 && dx <= 5 && y <= 5;   // clear of the moon and its glow
+        bool clash = false;
         for (int j = 0; j < i && !clash; j++)
           clash = abs(wrapCol(x - starX[j] + COLS / 2) - COLS / 2) < 3 && abs(y - starY[j]) < 2;
         if (!clash) break;
       } while (++tries < 20);
       starX[i] = (int8_t)x; starY[i] = (int8_t)y;
     }
-    lapAt = SHIP_IN_AT + SHIP_IN_MS + (uint32_t)(COLS * 1000.0f / pxPerS);
+    if (laps < 1) laps = 1;
+    lapAt = SHIP_IN_AT + SHIP_IN_MS + (uint32_t)(laps * COLS * 1000.0f / pxPerS);
     outAt = lapAt;
     blackAt = outAt + SHIP_OUT_MS;
     fadeInAt = blackAt + SHIP_BLACK_MS;
@@ -437,7 +435,7 @@ struct Ship {
       case 'W': p.c = rgb(160, 160, 150); break;
       case 'w': p.c = rgb(85, 85, 80); break;
       case 'y': p.c = rgb(255, 175, 60); break;
-      case 'F': p.c = rgb(235, 55, 8); break;
+      case 'F': p.c = rgb(210, 14, 6); break;   // the waterline's red, brighter (more green reads orange)
       case 'B': p.c = rgb(8, 8, 9); break;
       case 'M': p.c = rgb(55, 55, 60); break;
       default: return p;
@@ -452,16 +450,6 @@ struct Ship {
     float hz = y < 4 ? 0 : (float)(y - 3) / (WATER_Y - 4);
     Rgb c = rgb(0, (uint8_t)(3 + 7 * hz * hz), (uint8_t)(6 + 22 * hz * hz));
     if (y < 4) c = rgb(0, 0, 0);
-    int dx = wrapCol(x - moonCol + COLS / 2) - COLS / 2;   // -32..31
-    // The moon: a 4x4 disc on rows 1..4, cols moonCol..moonCol+3, with a glow.
-    static const char *const MOON[4] = {".ab.", "abba", "abba", ".ab."};
-    if (dx >= 0 && dx < 4 && y >= 1 && y <= 4) {
-      char m = MOON[y - 1][dx];
-      if (m == 'b') return rgb(255, 238, 190);
-      if (m == 'a') return rgb(205, 185, 140);
-    }
-    float d = sqrtf((dx - 1.5f) * (dx - 1.5f) + (y - 2.5f) * (y - 2.5f) * 1.4f);
-    if (d < 6 && y < WATER_Y) c = addc(c, scale(rgb(40, 38, 30), (6 - d) / 6 * (6 - d) / 6));
     for (int i = 0; i < SHIP_STARS; i++)
       if (starX[i] == x && starY[i] == y) {
         float tw = smoothNoise(i, 5, t, 900);
@@ -484,13 +472,6 @@ struct Ship {
     static const Rgb BASE[4] = {{0, 48, 92}, {0, 30, 70}, {0, 20, 52}, {0, 12, 38}};
     Rgb c = scale(BASE[r], 0.55f + 0.7f * w);
     if (r == 0 && w > 0.86f) c = addc(c, scale(rgb(50, 120, 150), (w - 0.86f) / 0.14f));   // crests
-    // The moon's path: glints under the moon, wider towards you.
-    int dx = wrapCol(x - moonCol - 1 + COLS / 2) - COLS / 2;
-    float half = 1.2f + 0.8f * r;
-    if (fabsf(dx + 0.5f) <= half) {
-      float g = smoothNoise(x, y, t + (uint32_t)(hash3(x, y, 9) % 300), 300);
-      if (g > 0.62f) c = addc(c, scale(rgb(230, 215, 160), (g - 0.62f) / 0.38f * (1.0f - fabsf(dx + 0.5f) / (half + 1))));
-    }
     return c;
   }
 
@@ -572,11 +553,11 @@ struct Player {
     uint32_t t = SCROLL_AT_MS + (uint32_t)((DARK_FROM + o) / m.pxPerMs) + 1;
     return t < m.endAt ? t : m.endAt;
   }
-  // seed: where she starts and where the moon and stars sit. pxPerS: how fast
-  // she sails round (one lap is 64 columns).
-  void startShip(uint32_t seed, float pxPerS) {
+  // seed: where she starts and where the stars sit. pxPerS: how fast
+  // she sails round (one lap is 64 columns). laps: times round before she fades.
+  void startShip(uint32_t seed, float pxPerS, int laps = 1) {
     kind = SHIP;
-    ship.build(seed, pxPerS);
+    ship.build(seed, pxPerS, laps);
   }
   uint32_t duration() const {
     return kind == PHRASE ? message.endAt : kind == TICKER ? ticker.endAt : kind == SHIP ? ship.endAt : 0;
@@ -725,17 +706,27 @@ struct Player {
 // Test mode: every program in turn.
 inline int nextInOrder(int last, int count) { return count <= 0 ? -1 : (last + 1) % count; }
 
-// Festival mode: the spin and the phrases take turns, spin first, and each
-// phrase turn plays the one after the last phrase played, round and round.
+// Festival mode: three turns round and round, spin, a phrase, the ship. Each
+// phrase turn plays the one after the last phrase played. Programs: 0 the
+// spin, 1..phrases the phrases, phrases + 1 the ship (when ship is on).
 // last: the program played last (-1: none yet). lastPhrase: the last phrase
-// played, 1..count-1 (0: none yet). Without the spin (tickerOk false) it's
-// just the phrases in turn.
-inline int nextAlternating(int last, int lastPhrase, int count, bool tickerOk) {
-  const int phrases = count - 1;
-  if (tickerOk && (last != 0 || phrases <= 0)) return 0;
-  if (phrases <= 0) return -1;
-  int p = lastPhrase >= 1 && lastPhrase <= phrases ? lastPhrase : 0;   // 0..phrases-1 next
-  return 1 + p % phrases;
+// played, 1..phrases (0: none yet). A turn that can't play (no spin when
+// tickerOk is false, no phrases, no ship) is skipped. -1: nothing can play.
+inline int nextRotation(int last, int lastPhrase, int phrases, bool ship, bool tickerOk) {
+  const int shipProg = 1 + phrases;
+  // The turn last played: 0 spin, 1 phrase, 2 ship. Nothing yet counts as
+  // the ship, so the spin comes first.
+  int turn = last == 0 ? 0 : (last >= 1 && last <= phrases) ? 1 : 2;
+  for (int k = 1; k <= 3; k++) {
+    int next = (turn + k) % 3;
+    if (next == 0 && tickerOk) return 0;
+    if (next == 1 && phrases > 0) {
+      int p = lastPhrase >= 1 && lastPhrase <= phrases ? lastPhrase : 0;   // 0..phrases-1 next
+      return 1 + p % phrases;
+    }
+    if (next == 2 && ship) return shipProg;
+  }
+  return -1;
 }
 
 // One sample every SAMPLE_MS; the oldest is about 10 minutes back.

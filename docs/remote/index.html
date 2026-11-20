@@ -251,7 +251,7 @@ class Totem {
 class DemoTotem {
   constructor() {
     this.s = { auth: 0, you: { on: 1, bpm: 92 }, crew: [{ i: 'V', on: 1, bpm: 104 }], bright: 3, power: 1, shows: 1, playing: -1, show: '', left: 0, next: 287, paused: 0 };
-    this.phrases = ["WE'RE ALL WE NEED", 'LIFE IS MADE OF SMALL MOMENTS LIKE THESE', 'ALWAYS CHOOSE ADVENTURE', "GLAD YOU'RE HERE", "YOU ARE SOMEBODY'S FAVORITE MEMORY", 'MAIN CHARACTER ENERGY'];
+    this.phrases = ["WE'RE ALL WE NEED", 'LIFE IS MADE OF SMALL MOMENTS LIKE THESE', 'ALWAYS CHOOSE ADVENTURE', "GLAD YOU'RE HERE", "YOU ARE SOMEBODY'S FAVORITE MEMORY", 'MAIN CHARACTER ENERGY', 'QUEEN MARY'];
     setInterval(() => this.tick(), 1000);
   }
   tick() {
@@ -280,7 +280,7 @@ class DemoTotem {
   }
   async read(chr) {
     if (!this.s.auth) return { auth: 0 };
-    return chr === 'info' ? { auth: 1, levels: 5, max: 60, phrases: this.phrases } : JSON.parse(JSON.stringify(this.s));
+    return chr === 'info' ? { auth: 1, levels: 5, max: 60, ship: this.phrases.length, shipLaps: 3, phrases: this.phrases } : JSON.parse(JSON.stringify(this.s));
   }
   disconnect() { this.connected = false; this.onDisconnect && this.onDisconnect(); }
 }
@@ -438,7 +438,12 @@ function buildShows() {
     el.appendChild(b);
   };
   add(0, 'Spin', 'The faces spin round the ring · about 8 s');
-  (info.phrases || []).forEach((p, i) => add(i + 1, showText(p), ''));
+  const ship = info.ship;   // her show number, from firmware that has her
+  if (ship) {
+    const laps = info.shipLaps || 1;
+    add(ship, 'Queen Mary', `A liner sails round the ring at night${laps > 1 ? ` · ${laps} laps` : ''}`);
+  }
+  (info.phrases || []).forEach((p, i) => { if (i + 1 !== ship) add(i + 1, showText(p), ''); });
 }
 
 function buildLevels() {
