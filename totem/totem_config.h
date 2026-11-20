@@ -174,15 +174,17 @@
 
 // --- Friend on the faces (FACES layout) ---
 // 1: when a friend's strap is connected, two opposite faces show them with a
-// cyan heart (everything else as for you), the other two show you with a red heart. 0: all four show you.
+// purple heart (everything else as for you), the other two show you with a hot pink heart. 0: all four show you.
+// Your heart is hot pink, not red, so it stays distinct from the red BPM digits
+// and bar when you're in the top zone.
 // Only the first connected friend is shown; the ring layout shows them all.
 // Either way, if your Whoop drops out while a friend is live, all four faces
 // show that friend.
 #ifndef CREW_FACES
 #define CREW_FACES 1
 #endif
-#define HEART_RGB_YOU    CRGB(255, 20, 20)
-#define HEART_RGB_FRIEND CRGB(0, 200, 255)
+#define HEART_RGB_YOU    CRGB(255, 30, 110)  // hot pink
+#define HEART_RGB_FRIEND CRGB(130, 0, 255)   // purple
 
 // --- 7. Shows: something for the crowd every 5 minutes ---
 // Every SHOW_EVERY_MIN minutes the heart rate steps aside for one show. The

@@ -15,7 +15,7 @@ MatrixPanel_I2S_DMA *display = nullptr;
 // ============================================================================
 // LAYOUT (64x32)
 // ============================================================================
-//   y0                the fixed 5-segment zone legend, lit at all times
+//   y0                the fixed 4-segment zone legend, lit at all times
 //   y1..2             the 2px-tall live HR bar (current zone's color)
 //   y6..19            BPM, built-in 5x7 at size 2, zone-colored, and
 //   y6..20            the heart, pulsing in brightness on each beat (tops
@@ -81,12 +81,12 @@ const int SEVENSEG_W = 9, SEVENSEG_H = 16, SEVENSEG_T = 2, SEVENSEG_GAP = 2;
 const int STEPS_TOP_Y  = 24;
 // TomThumb is baseline-positioned; 31 - 5 = top row 26.
 const int STEPS_LABEL_BASELINE_Y = 31;
-// Steps are green, and specifically not blue. Blue is Z2's color on both the
-// legend and the bar, so a blue step count read as a heart-rate element that
-// had wandered to the bottom of the panel — the only two numbers up there are
-// already easy to confuse, and sharing a hue with a zone made it worse. Green
-// appears nowhere in the zone ramp, so it can't be misread as a zone, and it
-// stays clear of Z3's yellow.
+// Steps are green, and specifically not a zone color. A blue step count (blue
+// was once a zone) read as a heart-rate element that had wandered to the
+// bottom of the panel — the only two numbers up there are already easy to
+// confuse, and sharing a hue with a zone made it worse. Green appears nowhere
+// in the zone ramp, so it can't be misread as a zone, and it stays clear of
+// the yellow zone.
 //
 // The label shares the count's color; its smaller 3x5 face is what keeps it
 // from out-shouting the number.
@@ -106,37 +106,26 @@ const float HEART_FLOOR = 0.35f;  // brightness between beats; see drawMainScree
 
 unsigned long lastBeatTime = 0;
 
-// The zone ramp, as it appears on the legend and the bar. Ordered so
-// PERCEIVED brightness climbs the whole way up — dim neutral, bright neutral,
-// then a cold-to-hot hue ramp — so the bar reads as intensity growing even
-// before you've learned which color means which zone.
+// The zone ramp, as it appears on the legend and the bar: a neutral, then a
+// warm hue ramp, so the bar reads as intensity growing even before you've
+// learned which color means which zone.
 //
-// White is capped at 140 rather than 255 on purpose. At full white, Z1 was
-// the brightest thing on the panel and the step up to blue read as a DROP in
-// intensity, which is backwards. Holding white below blue's apparent
-// brightness keeps the ramp monotonic.
+// White is capped at 140 rather than 255 on purpose. At full white, the
+// neutral zone was the brightest thing on the panel and the step up to the
+// first hue read as a DROP in intensity, which is backwards.
 uint16_t zonePalette(int zone) {
   switch (zone) {
-    case 0:  return display->color565(45, 45, 45);    // gray   — barely moving
-    case 1:  return display->color565(140, 140, 140); // white  — warming up
-    case 2:  return display->color565(0, 110, 255);   // blue   — moving
-    case 3:  return display->color565(255, 190, 0);   // yellow — going for it
-    default: return display->color565(255, 30, 30);   // red    — Z4/5
+    case 0:  return display->color565(140, 140, 140); // white  — under 100
+    case 1:  return display->color565(255, 190, 0);   // yellow — 100-109
+    case 2:  return display->color565(255, 90, 0);    // orange — 110-119
+    default: return display->color565(255, 30, 30);   // red    — 120+
   }
 }
 
 // The same zones for the BPM digits, held at a uniform brightness so the
 // number is equally readable in every zone — only the hue changes.
 //
-// Consequence worth knowing: at equal brightness, "gray" and "white" ARE the
-// same color, so Z0 and Z1 can't be told apart in the number and both render
-// white. That's the right trade — the number's job is to be readable at rest,
-// and the bar below already says which of the two you're in. The blue is
-// lifted off its pure primary to buy legibility: a pure (0,110,255) numeral is
-// noticeably harder to read than a yellow one at the same nominal value,
-// because blue LEDs carry the least perceived brightness.
-//
-// Z4's red is NOT lifted, though it was. (255,70,70) read as pink on the panel
+// The top zone's red is NOT lifted, though it was. (255,70,70) read as pink on the panel
 // and plainly failed to match the red bar above it — which is the one thing
 // the top zone's color has to do, since bar and number are 4px apart and the
 // eye compares them directly. Red LEDs are bright enough that the lift bought
@@ -146,9 +135,8 @@ uint16_t zonePalette(int zone) {
 uint16_t zoneTextPalette(int zone) {
   switch (zone) {
     case 0:  return display->color565(255, 255, 255); // white
-    case 1:  return display->color565(255, 255, 255); // white (see above)
-    case 2:  return display->color565(80, 165, 255);  // blue, lifted
-    case 3:  return display->color565(255, 205, 0);   // yellow
+    case 1:  return display->color565(255, 205, 0);   // yellow
+    case 2:  return display->color565(255, 100, 0);   // orange
     default: return display->color565(255, 30, 30);   // red, matching the bar
   }
 }
@@ -458,7 +446,7 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
 
   // --- Zone legend: the fixed scale on the very top row, lit whether or not
   // we have a reading, so the bar below it always has context.
-  for (int z = 0; z < 5; z++) {
+  for (int z = 0; z < ZONE_COUNT; z++) {
     int x0 = zoneSliceX(z, PANEL_WIDTH);
     int x1 = zoneSliceX(z + 1, PANEL_WIDTH);
     display->fillRect(x0, LEGEND_Y, x1 - x0, 1, zonePalette(z));
@@ -467,14 +455,14 @@ void drawMainScreen(int bpm, bool connected, unsigned long steps) {
   // --- The live bar, 2px tall, hanging off the legend.
   //
   // Painted in the LEGEND's colors slice by slice rather than one flat color:
-  // filling to the middle of the blue zone gives a run of gray, then white,
-  // then blue. The bar is literally the legend lit up to where you are — it
+  // filling to the middle of the orange zone gives a run of white, then
+  // yellow, then orange. The bar is literally the legend lit up to where you are — it
   // thickens from 1px to 3px behind you — so the zone is read from where the
   // fill STOPS, not from what color it is.
   if (connected) {
     int width = (int)(barFraction(bpm) * PANEL_WIDTH + 0.5f);
     if (width < 1) width = 1; // always show something so it never reads as "off"
-    for (int z = 0; z < 5; z++) {
+    for (int z = 0; z < ZONE_COUNT; z++) {
       int x0 = zoneSliceX(z, PANEL_WIDTH);
       if (width <= x0) break;              // fill ended before this slice
       int x1 = zoneSliceX(z + 1, PANEL_WIDTH);

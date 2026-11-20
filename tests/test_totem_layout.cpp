@@ -150,14 +150,36 @@ int main() {
   CHECK(face::barFill(1.80f, 1) == 2 && face::barFill(1.20f, 2) == 1, "bar fill stuck after a clear move");
   CHECK(face::barFill(6.0f, 1) == 6 && face::barFill(0.4f, 5) == 0, "bar fill held back a big jump");
   {
-    // 62-64 bpm alternating, as in the serial log: the end pixel never moves.
-    int fill = face::barFill(barFraction(63) * face::W, 0), moves = 0;
+    // 69/70 alternating, right on a pixel edge (as totem.ino calls it, +0.5
+    // px so the lit pixel is the one you're in): the end pixel never moves.
+    int fill = face::barFill(barFraction(70) * face::W + 0.5f, 0), moves = 0;
     for (int i = 0; i < 40; i++) {
-      int f = face::barFill(barFraction(i % 2 ? 62 : 63) * face::W, fill);
+      int f = face::barFill(barFraction(i % 2 ? 69 : 70) * face::W + 0.5f, fill);
       if (f != fill) moves++;
       fill = f;
     }
-    CHECK(moves == 0, "bar end pixel moved %d times with bpm 62/63", moves);
+    CHECK(moves == 0, "bar end pixel moved %d times with bpm 69/70", moves);
+  }
+
+  // The white zone is one pixel per 10 bpm: 60s, 70s, 80s, 90s.
+  CHECK(zoneSliceX(1, face::W) == 4, "white zone is %d px, not 4", zoneSliceX(1, face::W));
+  for (int bpm = 60; bpm < 100; bpm++) {
+    int fill = face::barFill(barFraction(bpm) * face::W + 0.5f, -10);   // -10: no hold
+    CHECK(fill == (bpm - 60) / 10 + 1, "%d bpm lights %d px, expected %d", bpm, fill, (bpm - 60) / 10 + 1);
+  }
+
+  // The power-measuring frame draws "188": no real BPM may light more pixels,
+  // or the brightness cap would under-measure that frame.
+  {
+    auto lit = [](int bpm) {
+      int g[3], n = face::bpmGlyphs(bpm, g), c = 0;
+      for (int y = 0; y < face::H; y++)
+        for (int x = 0; x < face::W; x++) c += face::textAt(g, n, x, y);
+      return c;
+    };
+    int worst = lit(188);
+    for (int bpm = 0; bpm <= 250; bpm++)
+      CHECK(lit(bpm) <= worst, "%d bpm lights %d digit px, more than 188's %d", bpm, lit(bpm), worst);
   }
 
   // Visible floor: at every global brightness, the floor survives FastLED's

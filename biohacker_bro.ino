@@ -15,7 +15,7 @@
     - Shows ONE fixed screen (no cycling): live BPM in your current HR
       zone's color, a heart icon beating in time with your actual heart
       rate, a step count, and a zone bar along the top two rows under a
-      permanently-lit 5-segment zone legend
+      permanently-lit 4-segment zone legend
     - Counts steps in real time using the accelerometer
 
   Code is split across a few files so each subsystem can be understood (and
