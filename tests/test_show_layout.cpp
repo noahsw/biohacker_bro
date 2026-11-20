@@ -1,5 +1,5 @@
 // Host tests for the totem's shows (totem/show_layout.h): the scrolling
-// messages, the spin and the scheduler. Catches a font edit that breaks a
+// messages, the spin, the Queen Mary and the scheduler. Catches a font edit that breaks a
 // glyph, a message that doesn't scroll steadily or lights the seam, a frame
 // drawn off the ring and a scheduler that repeats itself.
 
@@ -195,6 +195,41 @@ int main() {
     CHECK(show::nextAlternating(1, 1, 2, true) == 0 && show::nextAlternating(0, 1, 2, true) == 1, "one phrase: spin, phrase");
   }
   { int p = -1, seen = 0; for (int k = 0; k < 8; k++) { p = show::nextInOrder(p, 4); seen |= 1 << p; } CHECK(seen == 15, "test mode skips a show"); }
+
+  // --- Queen Mary ---
+  {
+    static show::Player pl;
+    show::People p{};
+    for (int y = 0; y < show::ROWS; y++) for (int x = 0; x < show::COLS; x++) normal[y][x] = show::rgb(255, 0, 0);
+    auto count = [](const show::Frame &f, bool funnelOnly) {
+      int n = 0;
+      for (int y = 0; y < show::ROWS; y++)
+        for (int x = 0; x < show::COLS; x++) {
+          Rgb c = f[y][x];
+          n += funnelOnly ? (c.r > 200 && c.g < 80 && c.b < 30) : (c.r || c.g || c.b);
+        }
+      return n;
+    };
+    for (uint32_t seed = 1; seed < 30; seed++) {
+      pl.startShip(seed * 2654435761u, 4.0f);
+      const show::Ship &sh = pl.ship;
+      uint32_t d = pl.duration();
+      CHECK(d == sh.endAt && d > 18000 && d < 24000, "ship lasts %u ms", d);
+      CHECK(pl.render(100, normal, p, frame) == 0, "ship: heart rate's brightness while it fades out");
+      CHECK(pl.render(sh.blackAt + 50, normal, p, frame) == 1 && count(frame, false) == 0, "ship: dark before the heart rate");
+      CHECK(pl.render(d - 1, normal, p, frame) == 0, "ship: heart rate's brightness while it fades in");
+      // Under way, all three red funnels show (3 by 3 each, under black tops).
+      for (uint32_t t = show::SHIP_IN_AT + show::SHIP_IN_MS; t < sh.outAt; t += 997) {
+        pl.render(t, normal, p, frame);
+        int red = count(frame, true);
+        CHECK(red == 27, "ship at %u ms: %d funnel pixels", t, red);
+      }
+      CHECK(sh.pos(sh.outAt) - sh.pos(show::SHIP_IN_AT + show::SHIP_IN_MS) >= show::COLS - 0.5f, "ship: a full lap in view");
+      for (int i = 0; i < show::SHIP_STARS; i++) CHECK(sh.starY[i] >= 0 && sh.starY[i] < show::WATER_Y, "star in the sea");
+    }
+    pl.startShip(7, 1.0f);  CHECK(pl.duration() > 60000, "slow ship");
+    pl.startShip(7, 12.0f); CHECK(pl.duration() < 12000, "fast ship");
+  }
 
   // --- Heart rate history ---
   {

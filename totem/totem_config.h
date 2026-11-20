@@ -198,7 +198,7 @@
 #define SHOWS_ENABLED 1        // 0 = all off: heart rate only, as before
 #endif
 #ifndef SHOW_TEST_MODE
-#define SHOW_TEST_MODE 0       // 1 = every show back to back (ticker, then each phrase), to try them out
+#define SHOW_TEST_MODE 0       // 1 = every show back to back (ticker, each phrase, the ship), to try them out
 #endif
 #define SHOW_EVERY_MIN 5       // minutes between shows (the first, a spin, is this long after power-on)
 #define SHOW_TEST_GAP_S 4      // test mode: seconds of heart rate between shows
@@ -221,6 +221,15 @@
 #define SHOW_SCROLL_PX_PER_S 6.0f   // scroll speed, columns a second (a letter is about 6)
 #define SHOW_REPEATS 3         // times each phrase comes round, a panel's width apart
 #define SHOW_TEXT_RGB 255, 255, 255      // text colour
+
+// The Queen Mary: the night sea fades in, a three-funnel liner sails once
+// round the ring past the moon with her wake behind her, then fades away.
+// About 21 s. She takes a phrase's turn, after the last phrase. The phone
+// lists her as a button after the phrases.
+#ifndef SHOW_SHIP
+#define SHOW_SHIP 1            // 0 = no ship
+#endif
+#define SHOW_SHIP_PX_PER_S 4.0f   // sailing speed, columns a second; 4 = one lap in 16 s
 
 // --- 8. Phone control (see phone_ble.h and docs/remote/) ---
 // Open the control page in the Bluefy browser on your iPhone, tap Connect,

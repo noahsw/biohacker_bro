@@ -21,6 +21,9 @@
       heart rates racing past)
     - messages: a phrase scrolls round the ring three times, fading in and
       out of a dark seam on one panel
+    - Queen Mary: a night sea fades in and a three-funnel liner sails once
+      round the ring past the moon (SHOW_SHIP 0 turns her off); she takes her
+      turn after the last phrase
   SHOW_TEST_MODE plays them back to back; SHOWS_ENABLED 0 turns them off.
 
   PHONE (phone_ble.h): a phone page over Bluetooth can scroll your own text,
@@ -467,7 +470,18 @@ static void drawOrientationTest() {
 #if SHOWS_ENABLED && !TOTEM_RING
 static_assert(RING_COLS == show::COLS, "shows are laid out for four 16x16 panels");
 static const char *const SHOW_PHRASE_LIST[] = {SHOW_PHRASES};
-static const int SHOW_PROGRAMS = 1 + (int)(sizeof(SHOW_PHRASE_LIST) / sizeof(SHOW_PHRASE_LIST[0]));   // 0 = ticker
+static const int SHOW_PHRASE_COUNT = (int)(sizeof(SHOW_PHRASE_LIST) / sizeof(SHOW_PHRASE_LIST[0]));
+// 0 = the spin, 1.. the phrases, then the ship (it takes its turn like a phrase).
+static const int SHOW_SHIP_PROG = SHOW_SHIP ? 1 + SHOW_PHRASE_COUNT : -1;
+static const int SHOW_PROGRAMS = 1 + SHOW_PHRASE_COUNT + (SHOW_SHIP ? 1 : 0);
+static const char *const SHOW_SHIP_NAME = "QUEEN MARY";   // on the phone's button and status line
+
+// A program's name: a phrase, or the ship's.
+static const char *showProgName(int prog) {
+  if (prog == 0) return "Spin";
+  if (prog == SHOW_SHIP_PROG) return SHOW_SHIP_NAME;
+  return SHOW_PHRASE_LIST[prog - 1];
+}
 
 static show::Player showPlayer;
 static show::Frame showNormal, showFrame;
@@ -479,7 +493,7 @@ static int showLastPhrase = 0;     // 1.. : the last phrase played, so the next 
 static uint8_t showBright = 255;   // the show's brightness, from its brightest frame
 static int showFriend = -1;        // the friend in this show's ticker
 static bool showsPaused = false;   // from the phone: no timed shows (playing by hand still works)
-static int showPlaying = -1;       // what's on: 0 spin, 1.. a phrase, -2 the phone's text
+static int showPlaying = -1;       // what's on: 0 spin, 1.. a phrase (or the ship, last), -2 the phone's text
 static char showCustom[show::MAX_CHARS + 1];   // the phone's text, for the status line
 
 static Rgb toRgb(const CRGB &c) { return show::rgb(c.r, c.g, c.b); }
@@ -603,8 +617,9 @@ static void scanShowBrightness() {
 }
 
 // Starts a show now (its brightness follows, see scanShowBrightness()).
-// prog: 0 = the spin, 1.. = that phrase in SHOW_PHRASES. text: scroll this
-// instead (the phone's own text; prog is then ignored).
+// prog: 0 = the spin, 1.. = that phrase in SHOW_PHRASES, SHOW_SHIP_PROG = the
+// Queen Mary. text: scroll this instead (the phone's own text; prog is then
+// ignored).
 static void startShow(int prog, const char *text) {
   showFriend = CREW_FACES ? liveFriend() : -1;
   show::People p;
@@ -619,6 +634,10 @@ static void startShow(int prog, const char *text) {
     showPlayer.startTicker(p, SHOW_TICKER_PX_PER_S, SHOW_TICKER_NUMBERS, SHOW_SPIN_LAPS);
     showPlaying = 0;
     name = "ticker";
+  } else if (prog == SHOW_SHIP_PROG) {
+    showPlayer.startShip(esp_random(), SHOW_SHIP_PX_PER_S);
+    showPlaying = prog;
+    name = "ship";
   } else {
     showPlayer.startPhrase(SHOW_PHRASE_LIST[prog - 1], SHOW_SCROLL_PX_PER_S, show::rgb(SHOW_TEXT_RGB), SHOW_REPEATS);
     showPlaying = prog;
@@ -688,18 +707,20 @@ static void showStatusJson(phone::Out &o) {
   long left = showRunning ? ((long)showPlayer.duration() - (long)(millis() - showStart)) / 1000 : 0;
   long next = showsPaused || showRunning || !showNextAt ? -1 : ((long)(showNextAt - millis())) / 1000;
   o.add(",\"shows\":1,\"playing\":%d,\"show\":", showRunning ? showPlaying : -1);
-  o.str(!showRunning ? "" : showPlaying == -2 ? showCustom : showPlaying == 0 ? "Spin" : SHOW_PHRASE_LIST[showPlaying - 1]);
+  o.str(!showRunning ? "" : showPlaying == -2 ? showCustom : showProgName(showPlaying));
   o.add(",\"left\":%ld,\"next\":%ld,\"paused\":%d", left < 0 ? 0 : left, next < 0 ? -1 : next, showsPaused ? 1 : 0);
 }
 
-// The phrase list, for the phone's buttons.
+// The phrase list, for the phone's buttons (the ship last, as a button of
+// its own: PLAY of its number plays it).
 static void showInfoJson(phone::Out &o) {
   o.add(",\"phrases\":[");
   for (int i = 0; i + 1 < SHOW_PROGRAMS; i++) {
+    const char *name = showProgName(i + 1);
     // Stop short rather than leave the list unclosed: room for this one escaped, "]" and "}".
-    if (o.room() < 2 * (int)strlen(SHOW_PHRASE_LIST[i]) + 8) { o.full = true; break; }
+    if (o.room() < 2 * (int)strlen(name) + 8) { o.full = true; break; }
     if (i) o.add(",");
-    o.str(SHOW_PHRASE_LIST[i]);
+    o.str(name);
   }
   bool fit = o.ok();
   o.full = false;
