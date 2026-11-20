@@ -160,5 +160,10 @@ void brightnessWait(unsigned long ms) {
 
 uint8_t brightnessWheelAddr() { return pcaAddr; }
 int brightnessLevel() { return level + 1; }
+int brightnessLevelCount() { return LEVEL_COUNT; }
+void brightnessSetLevel(int level1) {
+  int l = level1 - 1;
+  setLevel(l < 0 ? 0 : l >= LEVEL_COUNT ? LEVEL_COUNT - 1 : l);
+}
 uint8_t brightnessWheelRaw() { return lastRaw; }
 unsigned long brightnessWheelErrors() { return readErrors; }
