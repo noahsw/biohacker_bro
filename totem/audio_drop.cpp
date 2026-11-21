@@ -138,7 +138,10 @@ void audioTask(void *) {
   int stepNow = gainStep;
   for (;;) {
     size_t got = i2s.readBytes((char *)buf, sizeof(buf));
-    if (got < sizeof(buf)) { readErrors++; continue; }
+    // A failing read can return at once rather than after its timeout. This
+    // task outranks the Bluetooth one on core 0, so without the pause a dead
+    // I2S link would spin here and starve the strap reconnects.
+    if (got < sizeof(buf)) { readErrors++; vTaskDelay(pdMS_TO_TICKS(10)); continue; }
     if (gainChanged) { gainChanged = false; stepNow = gainStep; det.noteGainChange(); }
     det.feed(buf, drop::Detector::BLOCK, (float)(stepNow * GAIN_STEP_DB));
     int adv = DROP_AUTO_GAIN ? det.gainAdvice() : 0;
