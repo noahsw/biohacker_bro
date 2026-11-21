@@ -193,7 +193,7 @@
 // rates race round the ring like a stock ticker, with a green or red arrow
 // for how far each moved in the last 10 minutes, or with SHOW_TICKER_NUMBERS 0
 // just the faces spinning round) or one of the phrases below scrolling round
-// the ring, or the Queen Mary below. The spin takes about 8 seconds, a phrase
+// the ring, or the Queen Mary below. The spin takes about 15 seconds, a phrase
 // about 1 to 2 minutes.
 // With numbers, the ticker only plays while your Whoop is sending.
 // Four-panel faces layout only. See show_layout.h.
@@ -209,23 +209,20 @@
 
 #define SHOW_TICKER 1          // 0 = phrases only
 #define SHOW_TICKER_NUMBERS 0  // 1 = big heart, BPM and arrows race round between the faces; 0 = just the faces spin
-#define SHOW_SPIN_LAPS 2       // full turns of the faces
-#define SHOW_TICKER_PX_PER_S 22   // spin speed at full tilt, columns a second (a face is 16)
+#define SHOW_SPIN_LAPS 4       // full turns of the faces
+#define SHOW_TICKER_PX_PER_S 20   // spin speed at full tilt, columns a second (a face is 16)
 
 // The phrases, in quotes, a comma after each but the last. Capitals or not,
 // they're shown in capitals. Up to 60 characters each; letters, digits and
 // ' ! . , ? & - work.
 #define SHOW_PHRASES \
   "WE'RE ALL WE NEED", \
-  "LIFE IS MADE OF SMALL MOMENTS LIKE THESE", \
   "ALWAYS CHOOSE ADVENTURE", \
   "GLAD YOU'RE HERE", \
-  "YOU ARE SOMEBODY'S FAVORITE MEMORY", \
   "MAIN CHARACTER ENERGY", \
   "PUSH THE BUTTON", \
   "HAPPY BIRTHDAY JACK", \
-  "ABOVE & BEYOND", \
-  "THIS IS GROUP THERAPY"
+  "ABOVE & BEYOND"
 #define SHOW_SCROLL_PX_PER_S 6.0f   // scroll speed, columns a second (a letter is about 6)
 #define SHOW_REPEATS 3         // times each phrase comes round, a panel's width apart
 #define SHOW_TEXT_RGB 255, 255, 255      // text colour

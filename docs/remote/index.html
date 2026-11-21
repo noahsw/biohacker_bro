@@ -258,7 +258,7 @@ class Totem {
 class DemoTotem {
   constructor() {
     this.s = { auth: 0, you: { on: 1, bpm: 92 }, crew: [{ i: 'V', on: 1, bpm: 104 }], bright: 3, power: 1, shows: 1, playing: -1, show: '', left: 0, next: 287, paused: 0 };
-    this.phrases = ["WE'RE ALL WE NEED", 'LIFE IS MADE OF SMALL MOMENTS LIKE THESE', 'ALWAYS CHOOSE ADVENTURE', "GLAD YOU'RE HERE", "YOU ARE SOMEBODY'S FAVORITE MEMORY", 'MAIN CHARACTER ENERGY', 'PUSH THE BUTTON', 'HAPPY BIRTHDAY JACK', 'ABOVE & BEYOND', 'THIS IS GROUP THERAPY', 'QUEEN MARY'];
+    this.phrases = ["WE'RE ALL WE NEED", 'ALWAYS CHOOSE ADVENTURE', "GLAD YOU'RE HERE", 'MAIN CHARACTER ENERGY', 'PUSH THE BUTTON', 'HAPPY BIRTHDAY JACK', 'ABOVE & BEYOND', 'QUEEN MARY'];
     setInterval(() => this.tick(), 1000);
   }
   tick() {
@@ -468,7 +468,7 @@ function buildShows() {
     b.onclick = () => send('PLAY ' + n, n === 0 ? 'Spinning' : 'Playing');
     el.appendChild(b);
   };
-  add(0, 'Spin', 'The faces spin round the ring · about 8 s');
+  add(0, 'Spin', 'The faces spin round the ring · about 15 s');
   const ship = info.ship;   // her show number, from firmware that has her
   if (ship) {
     const laps = info.shipLaps || 1;

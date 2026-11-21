@@ -333,7 +333,7 @@ Every 5 minutes the totem's heart rate steps aside for one show. Three turns go
 round: the spin, a message, then the Queen Mary, so each comes round every 15
 minutes, and each message turn plays the next phrase in `SHOW_PHRASES`:
 
-- **Spin:** the four faces spin round the ring twice (about 8 seconds), then
+- **Spin:** the four faces spin round the ring four times (about 15 seconds), then
   bump into place and the zone bars flash. `SHOW_TICKER_NUMBERS 1` adds a stock
   ticker of your and your friend's heart rates racing past between them.
 - **Messages:** the phrase scrolls the whole way round the ring three times in
