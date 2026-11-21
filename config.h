@@ -127,10 +127,17 @@
 // that rounding shortchanges the top bit plane: at 25 and 50 it gets ~31%
 // less on-time than it should, so red 128 shows DIMMER than red 127. The
 // heart's fade crosses that boundary every beat, and it read as a laggy,
-// stuttering pulse. 36 and 53 look the same as 25 and 50 but round evenly
-// (within 3%); 90, 140 and 200 are already within 5%. Check any new value
-// against setBrightnessOE() in the library before using it.
-const uint8_t BRIGHTNESS_LEVELS[] = {36, 53, 90, 140, 200};
+// stuttering pulse. 36 rounds evenly where 25 and 50 don't; 90, 140 and 200
+// are within 5%. Check any new value against setBrightnessOE() in the
+// library before using it.
+//
+// Levels 1 and 2 are for dimming down (neighbours, battery), so they sit well
+// below the usual level 3: about a fifth and two fifths of it. 18 is the
+// dimmest value the HUB75 library still splits evenly across bit planes (it
+// can only shorten the top plane in whole pixel clocks: 4 of 62 here, and 17-
+// 20 all land on 4:2:1). Below 17 the bottom planes stop halving and dim
+// colours shift.
+const uint8_t BRIGHTNESS_LEVELS[] = {18, 36, 90, 140, 200};
 // Index into BRIGHTNESS_LEVELS used until the wheel saves a different one.
 #define BRIGHTNESS_DEFAULT_LEVEL 2
 // Which PCA9557 pin each wheel motion is. The wiki gives K1 = IO1,
