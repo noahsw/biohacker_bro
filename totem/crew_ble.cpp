@@ -27,6 +27,7 @@ struct Peer {
   volatile bool connected = false;
   volatile int bpm = 0;
   volatile unsigned long lastNotifyMs = 0;
+  volatile unsigned long retryAt = 0;   // after a failed connect: ignored by the scan until then
   bool noSlot = false;        // NimBLE ran out of connections for this one
 };
 const int MAX_PEERS = 1 + CREW_MAX;
@@ -35,6 +36,14 @@ int peerCount = 0;
 
 // A strap is "gone quiet" if connected but no reading for this long.
 const unsigned long STALE_MS = 5000;
+// Connected but silent this long: the link is up but the readings stopped
+// (the subscription got lost). Drop it so it reconnects and subscribes again,
+// rather than showing no heart rate for the rest of the night.
+const unsigned long SILENT_KICK_MS = 30000;
+// After a failed connect, leave that strap alone this long. A connect that
+// fails at once (no free connection) would otherwise loop scan/connect/fail
+// as fast as the strap advertises, starving everyone else's reconnects.
+const unsigned long RETRY_MS = 3000;
 
 NimBLEAdvertisedDevice pendingDevice;
 volatile int pendingPeer = -1;
@@ -80,7 +89,10 @@ void onNotify(NimBLERemoteCharacteristic *chr, uint8_t *data, size_t length, boo
 class ClientCallback : public NimBLEClientCallbacks {
   void onConnect(NimBLEClient *client) override {
     int i = peerForClient(client);
-    if (i >= 0) peers[i].connected = true;
+    if (i >= 0) {
+      peers[i].lastNotifyMs = millis();   // the silent-link timer starts now, not at the last session's reading
+      peers[i].connected = true;
+    }
   }
   void onDisconnect(NimBLEClient *client, int reason) override {
     int i = peerForClient(client);
@@ -102,6 +114,7 @@ class ScanCallback : public NimBLEScanCallbacks {
     seen.toUpperCase();
     for (int i = 0; i < peerCount; i++) {
       if (peers[i].connected || peers[i].noSlot || seen != peers[i].mac) continue;
+      if ((long)(millis() - peers[i].retryAt) < 0) continue;   // failed just now: give it a moment
       pendingDevice = *dev;
       pendingPeer = i;
       NimBLEDevice::getScan()->stop();
@@ -141,16 +154,44 @@ void bleTask(void *) {
   for (;;) {
     int i = pendingPeer;
     if (i >= 0) {
-      if (!connectPeer(i)) Serial.printf("Couldn't connect strap %d, still scanning.\r\n", i);
+      if (!connectPeer(i)) {
+        peers[i].retryAt = millis() + RETRY_MS;
+        Serial.printf("Couldn't connect strap %d, still scanning.\r\n", i);
+      }
       pendingPeer = -1;
       if (!allConnected()) startScan();
     }
 
+    unsigned long now = millis();
+
+    // Scan watchdog. The scan is restarted from onDisconnect and after each
+    // connect, but a start can fail (another connect in progress, a NimBLE
+    // host reset), and then a strap that dropped would never be picked up
+    // again. So: anyone missing and no scan running means start one.
+    static unsigned long lastScanCheck = 0;
+    if (now - lastScanCheck >= 2000) {
+      lastScanCheck = now;
+      if (pendingPeer < 0 && !allConnected() && !NimBLEDevice::getScan()->isScanning()) {
+        Serial.println("BLE: a strap is missing and the scan had stopped, restarting it.");
+        startScan();
+      }
+      for (int k = 0; k < peerCount; k++) {
+        Peer &p = peers[k];
+        // Signed: a reading can land after `now` was taken (another task).
+        if (p.connected && p.client && (long)(now - p.lastNotifyMs) > (long)SILENT_KICK_MS) {
+          Serial.printf("Strap %d connected but silent for %lu s, reconnecting.\r\n", k, SILENT_KICK_MS / 1000);
+          p.lastNotifyMs = now;   // once, not every check, while it goes
+          p.client->disconnect();
+        }
+      }
+    }
+
     // Publish to the drawing code. A strap that's connected but silent for
     // STALE_MS (out of range but the link not yet dropped) shows as gone.
-    unsigned long now = millis();
     for (int k = 0; k < peerCount; k++) {
-      bool live = peers[k].connected && peers[k].bpm > 0 && now - peers[k].lastNotifyMs < STALE_MS;
+      // Signed, as above: unsigned, a reading arriving just after `now` was
+      // taken wrapped to ~49 days old and blanked the BPM for a cycle.
+      bool live = peers[k].connected && peers[k].bpm > 0 && (long)(now - peers[k].lastNotifyMs) < (long)STALE_MS;
       int bpm = live ? peers[k].bpm : 0;
       if (k == 0) {
         hrConnected = peers[0].connected;
@@ -190,6 +231,12 @@ void bleSetup() {
   NimBLEDevice::init("BiohackerBro");
   NimBLEScan *scanner = NimBLEDevice::getScan();
   scanner->setScanCallbacks(&scanCallback, false);
+  // Callbacks only, keep nothing. NimBLE's default keeps every advertiser it
+  // has ever seen, and this scan runs all night whenever a strap is missing:
+  // in a crowd (phones, watches, earbuds, all rotating random addresses) that
+  // list grows by thousands an hour until the heap runs out, and every
+  // advert is a linear search of it on the Bluetooth core.
+  scanner->setMaxResults(0);
   scanner->setActiveScan(true);
   startScan();
   xTaskCreatePinnedToCore(bleTask, "crew_ble", 6144, nullptr, 1, nullptr, 0);

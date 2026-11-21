@@ -333,7 +333,7 @@ Every 5 minutes the totem's heart rate steps aside for one show. Three turns go
 round: the spin, a message, then the Queen Mary, so each comes round every 15
 minutes, and each message turn plays the next phrase in `SHOW_PHRASES`:
 
-- **Spin:** the four faces spin round the ring twice (about 8 seconds), then
+- **Spin:** the four faces spin round the ring four times (about 15 seconds), then
   bump into place and the zone bars flash. `SHOW_TICKER_NUMBERS 1` adds a stock
   ticker of your and your friend's heart rates racing past between them.
 - **Messages:** the phrase scrolls the whole way round the ring three times in
@@ -349,7 +349,8 @@ Settings are section 7 of `totem/totem_config.h`. `SHOW_TEST_MODE 1` plays
 every show back to back with 4 seconds of heart rate between, to check them
 before a night out; `SHOWS_ENABLED 0` turns them off. Each show runs at one
 steady brightness, worked out at its start from its brightest frame so it stays
-under `LED_MAX_MA`. Both shows need `RING_REVERSE` right (it's 1 on this
+under `LED_MAX_MA`; the Queen Mary instead stays at the heart rate's brightness
+throughout (working hers out took long enough that she visibly jumped mid-lap). Both shows need `RING_REVERSE` right (it's 1 on this
 totem): if text or faces jump between panels instead of flowing round, flip it
 (the orientation test's walking dot shows which way the chain runs). The layout and the font are
 host-tested (`tests/test_show_layout.cpp`).
