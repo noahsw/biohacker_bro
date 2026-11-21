@@ -960,6 +960,11 @@ void loop() {
                   FastLED.getBrightness(), wheelBrightness,
                   (unsigned long)ledCapMa(), usbHostAttached() ? "(usb)" : "",
                   (unsigned long)calculate_unscaled_power_mW(leds, NUM_LEDS) / 5);
+    // Memory, for long soak tests: free now, the lowest it has been since
+    // boot, and the biggest single block (falling while free holds steady is
+    // fragmentation). Flat over hours means nothing is leaking.
+    Serial.printf("heap: free=%lu  min=%lu  largest=%lu  up=%lus\r\n", (unsigned long)ESP.getFreeHeap(),
+                  (unsigned long)ESP.getMinFreeHeap(), (unsigned long)ESP.getMaxAllocHeap(), millis() / 1000);
     dropPrintStatus();
     lastStatus = millis();
   }
