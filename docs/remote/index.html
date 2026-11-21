@@ -228,7 +228,14 @@ const store = {
 // ---------------------------------------------------------------------------
 class Totem {
   constructor() { this.q = Promise.resolve(); this.enc = new TextEncoder(); this.dec = new TextDecoder(); }
-  run(fn) { const p = this.q.then(fn, fn); this.q = p.catch(() => {}); return p; }
+  // Each operation gets OP_TIMEOUT_MS. A read that never settles (the link
+  // went bad without a disconnect event) would otherwise block the queue for
+  // good: status frozen and every button silently doing nothing.
+  run(fn) {
+    const p = this.q.then(() => Promise.race([fn(), sleep(OP_TIMEOUT_MS).then(() => { throw new Error('timed out'); })]));
+    this.q = p.catch(() => {});
+    return p;
+  }
 
   async connect() {
     this.device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE] }] });
@@ -287,6 +294,11 @@ class DemoTotem {
 
 const demo = new URLSearchParams(location.search).has('demo');
 let totem = null, info = null, status = null, pollTimer = null, wantConnected = false;
+let reconnecting = false, pollFails = 0;
+const OP_TIMEOUT_MS = 5000;
+// Status reads failing this many times in a row (about 5 s+): drop the link
+// and let the reconnect loop bring it back.
+const MAX_POLL_FAILS = 5;
 
 // ---------------------------------------------------------------------------
 // Connecting and unlocking
@@ -338,15 +350,21 @@ async function onDisconnect() {
   clearTimeout(pollTimer);
   setDot(false);
   if (!wantConnected) { showMain(false); return; }
-  toast('Lost the totem, reconnecting…');
-  for (let i = 0; i < 20 && wantConnected; i++) {
-    await sleep(i < 5 ? 1000 : 3000);
-    try {
-      await totem.attach();
-      if (await unlock(store.get('pin', ''))) { toast('Back on'); poll(); return; }
-    } catch {}
+  if (reconnecting) return;   // one loop at a time: a failed attach can fire this again
+  reconnecting = true;
+  try {
+    toast('Lost the totem, reconnecting…');
+    for (let i = 0; i < 20 && wantConnected; i++) {
+      await sleep(i < 5 ? 1000 : 3000);
+      try {
+        await totem.attach();
+        if (await unlock(store.get('pin', ''))) { toast('Back on'); pollFails = 0; reconnecting = false; poll(); return; }
+      } catch {}
+    }
+    if (wantConnected) { wantConnected = false; showMain(false); $('connectError').textContent = 'Lost the totem. Connect again when you’re closer.'; }
+  } finally {
+    reconnecting = false;
   }
-  if (wantConnected) { wantConnected = false; showMain(false); $('connectError').textContent = 'Lost the totem. Connect again when you’re closer.'; }
 }
 
 function disconnect() {
@@ -358,11 +376,24 @@ function disconnect() {
 
 async function poll() {
   clearTimeout(pollTimer);
+  if (reconnecting) return;   // the reconnect loop restarts polling
+  let ok = false;
   try {
     const s = await totem.read('status');
-    if (s.auth === 1) { status = s; render(); }
+    if (s.auth === 1) { status = s; render(); ok = true; }
   } catch {}
-  if (wantConnected && totem.connected) pollTimer = setTimeout(poll, 1000);
+  pollFails = ok ? 0 : pollFails + 1;
+  if (!wantConnected || reconnecting) return;
+  // Stuck (reads timing out, or the totem forgot our PIN): reconnect.
+  if (pollFails >= MAX_POLL_FAILS || !totem.connected) {
+    pollFails = 0;
+    // Called directly too, not left to gattserverdisconnected: not every
+    // browser fires it for our own disconnect (a second call is ignored).
+    if (totem.connected) totem.disconnect();
+    onDisconnect();
+    return;
+  }
+  pollTimer = setTimeout(poll, 1000);
 }
 
 async function send(line, msg) {

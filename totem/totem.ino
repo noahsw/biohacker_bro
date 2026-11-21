@@ -621,6 +621,15 @@ static bool showScanning = false;
 static uint32_t showScanT = 0, showScanBestSum = 0, showScanBestT = 0, showScanMs = 0;
 static bool showScanAny = false;
 static show::People showScanPeople;
+static uint8_t showScanWheel = 0;   // the wheel's brightness the scan was for
+
+// (Re)starts the brightness scan for the show that's on.
+static void startShowScan() {
+  showScanT = showScanBestSum = showScanBestT = showScanMs = 0;
+  showScanAny = false;
+  showScanWheel = wheelBrightness;
+  showScanning = true;
+}
 
 static void scanShowBrightness() {
   if (!showScanning) return;
@@ -684,9 +693,7 @@ static void startShow(int prog, const char *text) {
   }
 
   showScanPeople = p;
-  showScanT = showScanBestSum = showScanBestT = showScanMs = 0;
-  showScanAny = false;
-  showScanning = true;
+  startShowScan();
   showRunning = true;
   showStart = millis();
   Serial.printf("show: %s, %.1f s\r\n", name, showPlayer.duration() / 1000.0f);
@@ -799,6 +806,10 @@ static bool showFrameDrawn() {
   blitShowFrame(showNormal);
   limitBrightness();
   uint8_t normalBright = FastLED.getBrightness();
+  // Brightness changed (wheel or phone) mid-show: work the show's level out
+  // again, or it stays at the old one until the show ends (two minutes for a
+  // long phrase). Until then it runs at the heart rate's, which has the new one.
+  if (wheelBrightness != showScanWheel) startShowScan();
   scanShowBrightness();   // wants the hearts at their peak too; uses showFrame and leds as scratch
   drawNormalRing(false, showNormal);
 

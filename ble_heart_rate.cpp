@@ -120,6 +120,11 @@ void bleSetup() {
   NimBLEDevice::init("BiohackerBro");
   NimBLEScan *scanner = NimBLEDevice::getScan();
   scanner->setScanCallbacks(&scanCallback, false);
+  // Callbacks only, keep nothing: by default NimBLE keeps every advertiser
+  // ever seen for as long as the scan runs, and with the Whoop out of range
+  // that's all night in a room full of phones and watches. The list grows
+  // until the heap runs out.
+  scanner->setMaxResults(0);
   scanner->setActiveScan(true);
   startScan(); // scan indefinitely until we find our Whoop
 }
