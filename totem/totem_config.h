@@ -88,9 +88,10 @@
 // 6.5-7 hours even if every frame hits the cap.
 //
 // By FastLED's own estimate (which counts ~1 mA for every unlit LED, so it
-// reads high) the ring averages ~2.1 A at the wheel's middle level, ~1.5 A
-// at level 1 and ~1.3 A at the lowest. So from the middle level up the cap is
-// what sets the brightness and the night is ~6.5-7 h; at level 1 it's ~8 h.
+// reads high) the ring averages ~2.1 A at the wheel's middle level, so from
+// the middle level up the cap is what sets the brightness and the night is
+// ~6.5-7 h. Levels 1 and 2 (18 and 36, under half of the middle level's 90)
+// sit under the cap and run longer; not measured.
 // Raise the cap for a brighter totem only if you can live with a shorter night.
 #ifndef LED_MAX_MA
 #define LED_MAX_MA 1800
