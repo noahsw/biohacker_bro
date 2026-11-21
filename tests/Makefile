@@ -20,11 +20,12 @@ HRLAYOUT_SOURCES := test_hr_layout.cpp   # hr_layout.h is header-only too
 DETECTOR_SOURCES := test_step_detector.cpp   # step_detector.h is header-only
 TOTEM_SOURCES := test_totem_layout.cpp $(ROOT)/hr_zones.cpp   # totem/face_layout.h, led_map.h header-only
 SHOW_SOURCES  := test_show_layout.cpp   # totem/show_layout.h, show_font.h header-only
+DROP_SOURCES  := test_drop_detect.cpp   # totem/drop_detect.h, drop_fx.h header-only
 PHONE_SOURCES := test_phone_protocol.cpp   # totem/phone_protocol.h header-only
 BINARIES      := $(BUILD)/test_hr_zones $(BUILD)/test_steps_layout \
                  $(BUILD)/test_hr_layout $(BUILD)/test_step_detector \
                  $(BUILD)/test_totem_layout $(BUILD)/test_show_layout \
-                 $(BUILD)/test_phone_protocol
+                 $(BUILD)/test_drop_detect $(BUILD)/test_phone_protocol
 
 # The binary is rebuilt unconditionally rather than by timestamp. It's a
 # single-file compile that takes well under a second, and make's 1-second
@@ -44,6 +45,7 @@ compile: | $(ROOT)/secrets.h $(BUILD)
 	@$(CXX) $(CXXFLAGS) -o $(BUILD)/test_step_detector $(DETECTOR_SOURCES)
 	@$(CXX) $(CXXFLAGS) -o $(BUILD)/test_totem_layout $(TOTEM_SOURCES)
 	@$(CXX) $(CXXFLAGS) -o $(BUILD)/test_show_layout $(SHOW_SOURCES)
+	@$(CXX) $(CXXFLAGS) -o $(BUILD)/test_drop_detect $(DROP_SOURCES)
 	@$(CXX) $(CXXFLAGS) -o $(BUILD)/test_phone_protocol $(PHONE_SOURCES)
 	@for r in 0 1; do for rv in 0 1; do for s in 0 1; do for fx in 0 1; do for fy in 0 1; do for t in 0 1; do \
 	  $(CXX) $(CXXFLAGS) -DTOTEM_RING=$$r -DRING_REVERSE=$$rv -DPANEL_SERPENTINE=$$s -DPANEL_FLIP_X=$$fx -DPANEL_FLIP_Y=$$fy -DPANEL_TRANSPOSE=$$t \

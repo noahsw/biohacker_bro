@@ -63,6 +63,7 @@
 #include "brightness.h"
 #include "display_ui.h"
 #include "show_layout.h"
+#include "audio_drop.h"
 #include "phone_ble.h"
 #include <esp_random.h>
 
@@ -274,6 +275,28 @@ static void drawFace(int bpm, bool connected, bool peak, CRGB heartRgb,
         if (face::heartAt(x, y)) faceBuf[y][x] = heart;
     n = 0;
     textColor = CRGB::Black;
+  }
+
+  // Beat drop: rings in the heart's colour spread out from it over the dark
+  // pixels, one after another, so the heart looks like it bursts (the beat
+  // ripple's shape; audio_drop.h starts them; only on the heart rate).
+  int dropAge = dropRingAgeMs();
+  for (int k = 0; dropAge >= 0 && k < DROP_RING_COUNT; k++) {
+    int age = dropAge - k * DROP_RING_GAP_MS;
+    if (age < 0 || age >= DROP_RING_MS) continue;
+    float r = 5.0f + 9.0f * age / DROP_RING_MS;
+    float fade = 1.0f - (float)age / DROP_RING_MS;
+    uint8_t v = (uint8_t)(DROP_RING_LEVEL * fade);
+    for (int y = 0; y < face::H; y++)
+      for (int x = 0; x < face::W; x++) {
+        float dx = x - face::HEART_CX, dy = y - face::HEART_CY;
+        float d = sqrtf(dx * dx + dy * dy);
+        if (fabsf(d - r) < DROP_RING_WIDTH && !faceBuf[y][x]) {
+          CRGB c = heartRgb;
+          c.nscale8_video(v);
+          faceBuf[y][x] = c;
+        }
+      }
   }
 
   // Brightness pips replace the number for two seconds after a wheel change.
@@ -867,6 +890,7 @@ void setup() {
   setPhoneInfo();
   phoneSetup();
   bleSetup();
+  dropSetup();   // beat drop: does nothing unless DROP_ENABLED or DROP_TEST_MODE
 }
 
 void loop() {
@@ -891,7 +915,9 @@ void loop() {
     blitRing();
     limitBrightness();
 #else
+    bool hrShowing = false;
     if (!showFrameDrawn()) {
+      hrShowing = true;
       // Measure the frame with the hearts at full, then draw the real one at that
       // brightness: the cap gives the same answer all through a beat.
       drawAndBlitFaces(true);
@@ -899,6 +925,9 @@ void loop() {
       drawAndBlitFaces(false);
     }
 #endif
+#endif
+#if !TOTEM_ORIENTATION_TEST && !TOTEM_RING
+    dropDraw(leds, wheelBrightness, ledCapMa() * 5, hrShowing);   // drops: starts the ring; test mode's meter
 #endif
     FastLED.show();   // ~23 ms for 768 LEDs (31 ms for the cube's 1024): 30+ fps
   }
@@ -912,6 +941,7 @@ void loop() {
                   FastLED.getBrightness(), wheelBrightness,
                   (unsigned long)ledCapMa(), usbHostAttached() ? "(usb)" : "",
                   (unsigned long)calculate_unscaled_power_mW(leds, NUM_LEDS) / 5);
+    dropPrintStatus();
     lastStatus = millis();
   }
   brightnessWait(2);

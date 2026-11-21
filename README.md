@@ -401,6 +401,49 @@ as `totem_config.h` section 6 describes. Settings are section 8 of
 `totem/totem_config.h`; `PHONE_ENABLED 0` turns it off. The command parser is
 host-tested (`tests/test_phone_protocol.cpp`).
 
+### Totem beat drop (`totem/audio_drop.cpp`)
+
+The board's two mics listen to the bass (about 40-150 Hz, the kick and bass
+line). A drop is the bass gone for at least 2 s while the music carries on (a
+breakdown and build), then back within 0.7 s, 10 dB or more above where the
+breakdown sat. Or the other way house does it: the build keeps some bass,
+the bass cuts out for a moment (even half a second), then comes back louder
+than the groove ever was, 5 dB over usual for a whole second. On a drop two rings in the heart's colour spread out from the
+heart on every face, one after another, over the dark pixels (about 1.2 s in
+all), so the heart looks like it bursts: the old beat ripple, thicker, slower
+and brighter. `DROP_DEMO 1` plays it every 2.5 s, music or not, to dial in
+the look. Only while the heart rate is showing: a drop during a show or with
+the lights off is ignored (the serial log says so). At most one every 30 s;
+a drop inside that is logged as skipped.
+
+It calibrates itself: the "usual" bass level is the 75th percentile of the
+last minute, learned only while the bass is in, so a long breakdown doesn't
+become the new normal and the same settings work in a living room and at a
+festival. Levels are measured net of the mic gain, which steps down 3 dB a
+second while the mic clips and up after 20 quiet seconds. Silence (between
+sets) isn't a breakdown, and neither is music fading up out of silence with
+the beat still to come: the bass has to have been in first. The bass has to
+slam back, at least 8 dB up on where it was a second earlier, so bass fading
+or sweeping back in isn't a drop, and stay in, back to within 3 dB of usual
+for 0.2 s, so a lone hit in the breakdown isn't one either. It's tuned to
+miss a borderline drop rather than fire on something that isn't one.
+
+The mics are on the **ES7210** (I2C 0x40), not the ES8311 (0x18, the speaker
+side). Audio power comes from a regulator switched by the PCA9557's IO5, off
+at power-up, so the firmware switches it on (read-modify-write, the wheel's
+pins untouched). I2S: MCLK IO38, BCLK IO48, LRCK IO21, ES7210 SDOUT1 IO47,
+16 kHz, 16-bit stereo. From the board maker's schematic, and tested on the
+board with house music.
+
+Settings are section 9 of `totem/totem_config.h`. `DROP_ENABLED 0` leaves
+the mics unpowered and changes nothing. For testing, `DROP_TEST_MODE 1`
+shows a sound meter on all four faces instead of the heart rate, bursts in
+rainbow over it on a drop, and logs the levels 4 times a second; `drop_fx.h`
+explains the meter. `DROP_ANIM 1` uses that rainbow burst instead of the
+ring in normal running too. `dropSetEnabled()`
+turns it on or off at run time. The detector and drawings are host-tested
+against a synthetic trance track (`tests/test_drop_detect.cpp`).
+
 ## Host-side tests
 
 ```bash
