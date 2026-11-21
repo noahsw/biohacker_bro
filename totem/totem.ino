@@ -223,8 +223,26 @@ static CRGB zoneRgb(int bpm) {
 // heartRgb: the heart's full-beat colour (hot pink for you, purple for your friend).
 // lastBeat: when that heart last beat, for the pulse and the ripple.
 // barFill: that person's bar position, kept between frames (see drawZoneBar).
+// Lowest beat level for this heart at the brightness going out now, so the
+// dim end of the pulse keeps the heart's colour (see face::heartMinLevel).
+static CRGB toCrgb(Rgb c) { return CRGB(c.r, c.g, c.b); }
+
+static float heartRest(CRGB c) {
+  Rgb r = {c.r, c.g, c.b};
+  return face::heartMinLevel(r, FastLED.getBrightness(), 0.18f);
+}
+
 static void drawFace(int bpm, bool connected, bool peak, CRGB heartRgb,
-                     unsigned long lastBeat, int &barFill) {
+                     unsigned long lastBeat, face::FaceState &st) {
+  int &barFill = st.barFill;
+#if DIGIT_DEMO == 1
+  static const int DEMO_BPM[] = {111, 119, 131, 145, 101, 110, 188, 71, 61};
+  bpm = DEMO_BPM[millis() / DIGIT_DEMO_MS % (sizeof(DEMO_BPM) / sizeof(DEMO_BPM[0]))];
+  connected = true;
+#elif DIGIT_DEMO == 2
+  bpm = DIGIT_DEMO_FROM + (int)(millis() / DIGIT_DEMO_STEP_MS % (200 - DIGIT_DEMO_FROM));
+  connected = true;
+#endif
   for (int y = 0; y < face::H; y++)
     for (int x = 0; x < face::W; x++) faceBuf[y][x] = CRGB::Black;
 
@@ -236,7 +254,8 @@ static void drawFace(int bpm, bool connected, bool peak, CRGB heartRgb,
 
   if (connected && bpm > 0) {
     // Never fully dark: still a heart between beats.
-    float lvl = peak ? 1.0f : 0.18f + 0.82f * beatIntensityAt(lastBeat);
+    float rest = heartRest(heartRgb);
+    float lvl = peak ? 1.0f : rest + (1.0f - rest) * beatIntensityAt(lastBeat);
     CRGB heart = heartRgb;
     heart.nscale8_video((uint8_t)(255 * lvl));
     for (int y = 0; y < face::H; y++)
@@ -267,7 +286,8 @@ static void drawFace(int bpm, bool connected, bool peak, CRGB heartRgb,
     // spikes on your real beats) doesn't pick it up.
     static unsigned long idleLastBeat = 0, idleBeatCount = 0;
     if (!peak) advanceBeat(IDLE_HEART_BPM, idleLastBeat, idleBeatCount);
-    float lvl = peak ? 1.0f : 0.18f + 0.82f * beatIntensityAt(idleLastBeat);
+    float rest = heartRest(heartRgb);
+    float lvl = peak ? 1.0f : rest + (1.0f - rest) * beatIntensityAt(idleLastBeat);
     CRGB heart = heartRgb;
     heart.nscale8_video((uint8_t)(255 * lvl));
     for (int y = 0; y < face::H; y++)
@@ -299,6 +319,18 @@ static void drawFace(int bpm, bool connected, bool peak, CRGB heartRgb,
       }
   }
 
+  // A new number (or colour) starts a fade from whatever was showing. The
+  // power-measuring frame draws 188 and leaves this alone.
+  if (!peak && (n != st.n || memcmp(glyphs, st.glyphs, n * sizeof(int)) != 0 || textColor != toCrgb(st.color))) {
+    memcpy(st.oldGlyphs, st.glyphs, sizeof(st.glyphs));
+    st.oldN = st.n;
+    st.oldColor = st.color;
+    memcpy(st.glyphs, glyphs, sizeof(glyphs));
+    st.n = n;
+    st.color = {textColor.r, textColor.g, textColor.b};
+    st.changedAt = millis();
+  }
+
   // Brightness pips replace the number for two seconds after a wheel change.
   if (millis() < indicatorUntil && indicatorCount > 0) {
     int x0 = (face::W - (indicatorCount * 3 - 1)) / 2;
@@ -309,9 +341,20 @@ static void drawFace(int bpm, bool connected, bool peak, CRGB heartRgb,
     return;
   }
 
-  for (int y = 0; y < face::H; y++)
-    for (int x = 0; x < face::W; x++)
-      if (face::textAt(glyphs, n, x, y)) faceBuf[y][x] = textColor;
+  if (peak) {
+    for (int y = 0; y < face::H; y++)
+      for (int x = 0; x < face::W; x++)
+        if (face::textAt(glyphs, n, x, y)) faceBuf[y][x] = textColor;
+    return;
+  }
+  unsigned long age = millis() - st.changedAt;
+  uint8_t t = BPM_FADE_MS > 0 && age < BPM_FADE_MS ? (uint8_t)(255 * age / BPM_FADE_MS) : 255;
+  for (int y = face::DIGIT_Y; y < face::H; y++)
+    for (int x = 0; x < face::W; x++) {
+      bool a = t < 255 && face::textAt(st.oldGlyphs, st.oldN, x, y);
+      bool b = face::textAt(st.glyphs, st.n, x, y);
+      if (a || b) faceBuf[y][x] = blend(a ? toCrgb(st.oldColor) : CRGB::Black, b ? toCrgb(st.color) : CRGB::Black, t);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -459,7 +502,7 @@ static int liveFriend() {
 // the totem keeps going while you step away. This ignores CREW_FACES: it's
 // about not having dead faces, not about showing friends.
 static void drawAndBlitFaces(bool peak) {
-  static int youFill = 0, friendFill = 0;
+  static face::FaceState youFill, friendFill;
   bool youLive = hrConnected && currentBPM > 0;
   int fr = liveFriend();
   if (!youLive && fr >= 0) {
@@ -555,7 +598,7 @@ static void faceToRing(show::Frame &ring, int who) {
 // The heart rate display as the ring shows it now: the same faces, the same
 // sides, as drawAndBlitFaces().
 static void drawNormalRing(bool peak, show::Frame &ring) {
-  static int youFill = 0, friendFill = 0;
+  static face::FaceState youFill, friendFill;
   drawFace(currentBPM, hrConnected, peak, HEART_RGB_YOU, lastBeatTime, youFill);
   int fr = CREW_FACES ? liveFriend() : -1;
   if (fr < 0) { friendLastBeat = millis(); faceToRing(ring, -1); return; }

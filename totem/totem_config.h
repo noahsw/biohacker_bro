@@ -118,6 +118,24 @@
 // unlit level, so you can find where you are on the bar at a glance.
 #define BAR_BLINK_MS   500
 
+// When the number changes, the old one fades out as the new one fades in over
+// this long, so a re-centring (a 1 coming or going) blends across rather than
+// hopping. 0 = change instantly.
+#define BPM_FADE_MS    250
+
+// DIGIT_DEMO: every face ignores the strap, to check the digit font on the
+// panels. 1 steps through a fixed list of heart rates (the 1s, the widest
+// numbers, two-digit ones), DIGIT_DEMO_MS each. 2 counts up from
+// DIGIT_DEMO_FROM to 199 and wraps, a beat every DIGIT_DEMO_STEP_MS, to see
+// how the number moves as 1s come and go. Build with
+// --build-property compiler.cpp.extra_flags=-DDIGIT_DEMO=2 to leave this at 0.
+#ifndef DIGIT_DEMO
+#define DIGIT_DEMO 0
+#endif
+#define DIGIT_DEMO_MS      3000
+#define DIGIT_DEMO_FROM    95
+#define DIGIT_DEMO_STEP_MS 700
+
 // --- 5. Round totem: EKG and ticker ---
 #define EKG_PX_PER_S     30    // write head speed: once round the 48 columns in 1.6 s
 #define EKG_FADE_MS      900   // how fast the trace behind the head dims
