@@ -622,6 +622,12 @@ static uint32_t showScanT = 0, showScanBestSum = 0, showScanBestT = 0, showScanM
 static bool showScanAny = false;
 static show::People showScanPeople;
 static uint8_t showScanWheel = 0;   // the wheel's brightness the scan was for
+// The Queen Mary runs at the heart rate's brightness the whole way through,
+// with no scan. Her scan took 10-15 s (every frame of a ~53 s show is costly
+// to draw), and when it finished she jumped to the new level part way across
+// the ring, which looked like a glitch. She's a dark scene, well under the
+// heart rate's worst-case frame, and FastLED's limiter still backs up the cap.
+static bool showAtNormal = false;
 
 // (Re)starts the brightness scan for the show that's on.
 static void startShowScan() {
@@ -693,7 +699,9 @@ static void startShow(int prog, const char *text) {
   }
 
   showScanPeople = p;
+  showAtNormal = !text && prog == SHOW_SHIP_PROG;
   startShowScan();
+  if (showAtNormal) showScanning = false;
   showRunning = true;
   showStart = millis();
   Serial.printf("show: %s, %.1f s\r\n", name, showPlayer.duration() / 1000.0f);
@@ -809,14 +817,14 @@ static bool showFrameDrawn() {
   // Brightness changed (wheel or phone) mid-show: work the show's level out
   // again, or it stays at the old one until the show ends (two minutes for a
   // long phrase). Until then it runs at the heart rate's, which has the new one.
-  if (wheelBrightness != showScanWheel) startShowScan();
+  if (!showAtNormal && wheelBrightness != showScanWheel) startShowScan();
   scanShowBrightness();   // wants the hearts at their peak too; uses showFrame and leds as scratch
   drawNormalRing(false, showNormal);
 
   show::People p;
   fillPeople(p, false);
   float mix = showPlayer.render(t, showNormal, p, showFrame);
-  if (showScanning) mix = 0;   // not worked out yet: the heart rate's brightness
+  if (showScanning || showAtNormal) mix = 0;   // not worked out yet, or the ship: the heart rate's brightness
   blitShowFrame(showFrame);
   FastLED.setBrightness((uint8_t)(normalBright + (showBright - normalBright) * mix + 0.5f));
   return true;
