@@ -60,12 +60,17 @@ int main() {
     for (int c = face::NARROW_W; c < face::DIGIT_W; c++)
       CHECK(face::GLYPH[face::GLYPH_NARROW_ONE][r][c] == '.', "narrow 1 spills into column %d", c);
   { int g[3]; CHECK(face::bpmGlyphs(128, g) == 3 && g[0] == face::GLYPH_NARROW_ONE && g[1] == 2 && g[2] == 8, "128 digits"); }
+  // "111": every 1 narrow, so the three stems are evenly spaced.
+  { int g[3]; CHECK(face::bpmGlyphs(111, g) == 3 && g[1] == face::GLYPH_NARROW_ONE && g[2] == face::GLYPH_NARROW_ONE, "111 should be all narrow 1s"); }
+  // Two-digit numbers keep the full-cell 1, so they never shift sideways.
+  { int g[3]; CHECK(face::bpmGlyphs(71, g) == 2 && g[1] == 1, "71 should keep the full-cell 1"); }
   // Four faces side by side: the gap between two panels' numbers (16 - width)
-  // must be clearly wider than the gap between digits, or neighbours run together.
+  // must be wider than the gap between digits, or neighbours run together
+  // (at 1 px, the same as between digits, "145 162" read as "14516 2").
   for (int bpm = 10; bpm <= 199; bpm++) {
     int g[3], n = face::bpmGlyphs(bpm, g);
     int seam = face::W - face::textWidth(g, n);
-    CHECK(seam >= 3 * face::DIGIT_GAP, "bpm %d leaves only %d px between panels", bpm, seam);
+    CHECK(seam >= 2 * face::DIGIT_GAP, "bpm %d leaves only %d px between panels", bpm, seam);
   }
 
   // Zone bar on 16 px: slices tile the row exactly, fill never shrinks as BPM rises.
@@ -185,6 +190,19 @@ int main() {
   // Visible floor: at every global brightness, the floor survives FastLED's
   // v*(b+1)>>8 and one less doesn't (so it isn't brighter than it needs to be).
   for (int b = 1; b <= 255; b++) {
+    // Heart rest level: every colour-carrying channel survives at 2+ where it
+    // can, and from the second brightness level up the rest level is untouched.
+    const Rgb hearts[2] = {{255, 30, 110}, {130, 0, 255}};
+    for (const Rgb &h : hearts) {
+      float l = face::heartMinLevel(h, (uint8_t)b, 0.18f);
+      CHECK(l >= 0.18f && l <= 1.0f, "heart level %f at brightness %d", l, b);
+      if (b >= 36) CHECK(l == 0.18f, "heart rest raised at brightness %d", b);
+      if (l > 0.18f) {
+        uint8_t s = (uint8_t)(255 * l);
+        CHECK(face::heartChannelOut(h.r, s, b) >= 2 && face::heartChannelOut(h.b, s, b) >= 2,
+              "heart loses a channel at brightness %d", b);
+      }
+    }
     int f = face::visibleFloor((uint8_t)b);
     CHECK(((f * (b + 1)) >> 8) >= 1, "floor %d goes dark at brightness %d", f, b);
     CHECK(f == 1 || (((f - 1) * (b + 1)) >> 8) == 0, "floor %d higher than needed at brightness %d", f, b);
