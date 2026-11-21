@@ -3,7 +3,8 @@
 // and risers; drops) goes through it at living-room and festival levels, and
 // it has to fire on the drops, at the drops, and nowhere else: not on a short
 // gap, not on silence between sets, not on a slow filter sweep back in, not on
-// a gain change. Also checks the gain advice.
+// a gain change. Also the other drop shape (a short gap, then bass louder than
+// the groove), and the gain advice.
 
 #include "../totem/drop_detect.h"
 #include "../totem/drop_fx.h"
@@ -28,6 +29,7 @@ struct Part {
   bool kick, bass, hats, pads, snareRoll, riser, silent;
   float lowpassSweep = 0;   // >0: kick+bass fade in through a low-pass opening over this part (no drop)
   bool fadeIn = false;      // the whole part fades up from 30 dB down (a set starting, the volume coming up)
+  float bassGain = 1;       // kick and bass this many times louder (a drop that's louder than the groove)
 };
 
 // Renders the track into stereo 16-bit at `level` (1 = loud), with a little
@@ -45,8 +47,8 @@ static std::vector<int16_t> render(const std::vector<Part> &parts, float level, 
       float pt = (float)i / FS;     // time into the part
       float bt = fmodf((float)t, beat);
       float s = 0;
-      float bassAmt = 1;
-      if (p.lowpassSweep > 0) bassAmt = pt / p.seconds;   // slow fade in
+      float bassAmt = p.bassGain;
+      if (p.lowpassSweep > 0) bassAmt *= pt / p.seconds;   // slow fade in
       if (p.kick) {
         float f = 50 + 70 * expf(-bt / 0.03f);
         s += 0.55f * bassAmt * expf(-bt / 0.15f) * sinf(2 * PI * f * bt);
@@ -161,12 +163,12 @@ int main() {
   expectDrops("gain change mid-groove", run(room, 18, starts[3] + 20, 12), dropsAt);
   expectDrops("gain change in a groove", run(room, 12, starts[9] + 10, 21), dropsAt);
 
-  // Cooldown: two drops 40 s apart, only the first counts.
+  // Cooldown: two drops 24 s apart, only the first counts.
   std::vector<Part> quick = {
     {40, true, true, true, true, false, false, false},
     {10, false, false, false, true, false, false, false},
     {6, false, false, true, true, true, true, false},
-    {20, true, true, true, true, false, false, false},
+    {10, true, true, true, true, false, false, false},
     {10, false, false, false, true, false, false, false},
     {4, false, false, true, true, true, true, false},
     {20, true, true, true, true, false, false, false},
@@ -186,6 +188,62 @@ int main() {
     };
     expectDrops("fade up from silence", run(render(fade, 0.9f)), {});
     expectDrops("fade up from silence, living room", run(render(fade, 0.9f * 0.0316f), 24), {});
+  }
+
+  // A breakdown with one hit of the groove in it, then the breakdown goes
+  // on: that hit isn't a drop.
+  {
+    std::vector<Part> hit = {
+      {40, true, true, true, true, false, false, false},
+      {6, false, false, false, true, false, false, false},
+      {0.25f, true, true, true, true, false, false, false},
+      {8, false, false, false, true, false, false, false},
+    };
+    expectDrops("lone hit in a breakdown", run(render(hit, 0.9f)), {});
+  }
+
+  // Gap and surge: the build keeps some bass, it cuts out for half a second,
+  // then comes back 8 dB louder than the groove. Fires once, about a second
+  // after the gap. Without the gap, or without the surge, it doesn't.
+  {
+    const float G = 0.56f, LOUD = 2.5f;   // -5 dB, +8 dB
+    std::vector<Part> surge = {
+      {40, true, true, true, true, false, false, false},
+      {4, true, true, true, true, false, false, false, 0, false, G},   // the build: bass a bit down
+      {0.5f, false, false, true, true, false, false, false},           // the gap
+      {20, true, true, true, true, false, false, false, 0, false, LOUD},
+    };
+    std::vector<float> st;
+    std::vector<int16_t> sr = render(surge, 0.5f, &st);
+    for (float gain : {0.0f, 24.0f}) {
+      std::vector<int16_t> lvl = gain > 0 ? render(surge, 0.5f * 0.0316f) : sr;
+      std::vector<Fired> f = run(lvl, gain);
+      const char *name = gain > 0 ? "gap and surge, living room" : "gap and surge";
+      CHECK(f.size() == 1, "%s: %d drops, expected 1", name, (int)f.size());
+      if (f.size() == 1) {
+        CHECK(f[0].at > st[3] + 0.8f && f[0].at < st[3] + 2.0f, "%s: drop at %.2f s, the gap ends at %.2f s",
+              name, f[0].at, st[3]);
+        std::printf("  %s: drop at %.2f s (gap ended at %.2f s)\n", name, f[0].at, st[3]);
+      }
+    }
+    std::vector<Part> noGap = {
+      {40, true, true, true, true, false, false, false},
+      {20, true, true, true, true, false, false, false, 0, false, LOUD},   // a louder chorus, no gap
+    };
+    expectDrops("louder chorus, no gap", run(render(noGap, 0.5f)), {});
+    std::vector<Part> noSurge = {
+      {40, true, true, true, true, false, false, false},
+      {0.5f, false, false, true, true, false, false, false},
+      {20, true, true, true, true, false, false, false},                 // back at the usual level
+    };
+    expectDrops("gap, no surge", run(render(noSurge, 0.5f)), {});
+    std::vector<Part> intro = {
+      {40, true, true, true, true, false, false, false},
+      {12, false, false, false, false, false, false, true},              // silence between tracks
+      {10, false, false, true, true, false, false, false},               // intro, no bass yet
+      {20, true, true, true, true, false, false, false, 0, false, LOUD}, // the beat comes in loud
+    };
+    expectDrops("new track, loud beat after an intro", run(render(intro, 0.5f)), {});
   }
 
   // Warm-up: a drop in the first 20 s can't be judged yet.

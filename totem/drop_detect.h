@@ -19,6 +19,12 @@
 //      level and JUMP_DB above where the breakdown sat, held for a few
 //      blocks so a single thump doesn't count.
 //
+// Or the other shape house uses: the build keeps (most of) its bass, a short
+// gap where the bass cuts out (GAP_DB under, even half a second), then it
+// comes back louder than the groove ever was: SURGE_DB over the usual level,
+// averaged over a whole second, starting within SURGE_WIN_MS of the gap. The
+// bass has to have been in before the gap, as for a breakdown.
+//
 // "Usual level" calibrates itself: once a second it notes the bass level,
 // keeps the last minute of those, and takes the 75th percentile, so it
 // follows the room (a living room, a festival stage) without any setting.
@@ -39,11 +45,14 @@ struct Params {
   float quietDb    = 9.0f;    // bass this far under the baseline = bass is out
   float buildMinS  = 2.0f;    // bass out at least this long before a drop counts
   float buildMaxS  = 120.0f;  // out longer than this: not a breakdown; relearn the room
-  float returnDb   = 6.0f;    // drop: bass back to within this of the baseline...
+  float returnDb   = 3.0f;    // drop: bass back to within this of the baseline...
   float jumpDb     = 10.0f;   // ...and at least this far above the breakdown's level...
   float riseMs     = 700.0f;  // ...within this long of the bass last being out
   float riseDb     = 8.0f;    // ...and at least this far up on where it was riseMs (+300 ms) ago: a slam, not a sweep
-  float cooldownS  = 90.0f;   // no second drop for this long
+  float gapDb      = 12.0f;   // a gap: bass this far under the baseline (any length)...
+  float surgeDb    = 5.0f;    // ...then a whole second of bass this far OVER it...
+  float surgeWinMs = 3000.0f; // ...ending within this long of the gap
+  float cooldownS  = 30.0f;   // no second drop for this long
   float silenceDb  = 20.0f;   // whole sound this far under its baseline = silence, not a breakdown
   float minLevelDb = -80.0f;  // bass baseline must be above this (dBFS at 0 dB gain): ignore a quiet room
   float graceMs    = 600.0f;  // bass back for less than this doesn't end the quiet (a stray thump)
@@ -86,7 +95,9 @@ struct Snapshot {
   bool clipping = false;    // samples hit full scale in the last second
   bool tooQuiet = false;    // baseline under minLevelDb: won't fire
   float lastJumpDb = 0, lastBuildS = 0;   // the last drop: how far the bass jumped, after how long out
+  bool lastSurge = false;   // the last drop was a gap and surge, not a breakdown
   uint32_t drops = 0;       // drops so far
+  uint32_t blocked = 0;     // drops the cooldown swallowed
   uint32_t ms = 0;          // audio clock
 };
 
@@ -98,7 +109,7 @@ public:
   static const int BLOCK_MS = 20;
   static const int WIN = 15;                   // 300 ms: smooths over the gaps between kicks
   static const int SECS = 60;                  // a minute of once-a-second levels for the baseline
-  static const int HOLD_BLOCKS = 3;            // drop condition held this many blocks (60 ms)
+  static const int HOLD_BLOCKS = 10;           // drop condition held this many blocks (200 ms): a lone hit in the breakdown isn't a drop
   static const int RISE_HIST = 64;             // 1.28 s of bass levels, for "did it jump just now"
 
   void begin(const Params &p) {
@@ -150,7 +161,7 @@ public:
     winN = winI = 0; nSecs = secI = 0;
     secBass = secFull = 0; secBlocks = 0;
     phase = WARMUP; candidate = false; armed = false; quietStart = 0; aboveSince = 0; lastQuiet = 0;
-    bdSum = 0; bdN = 0; holdRun = 0; histI = histN = 0;
+    bdSum = 0; bdN = 0; holdRun = 0; histI = histN = 0; gapAt = 0;
     S.phase = WARMUP; S.candidate = false;
   }
 
@@ -179,7 +190,33 @@ private:
   int bdN = 0, holdRun = 0;
   float hist[RISE_HIST];          // recent bass levels (dB), one per block
   int histI = 0, histN = 0;
+  uint32_t gapAt = 0;             // last block of a gap (bass GAP_DB under), 0 = none
+  float gapL = 0;                 // how low the bass went in it
   Snapshot S;
+
+  // The mean bass level (dB) over the last ms milliseconds.
+  float recentMean(float ms) const {
+    int n = (int)(ms / BLOCK_MS);
+    if (n > histN) n = histN;
+    if (n <= 0) return -120;
+    float sum = 0;
+    for (int i = 0; i < n; i++) sum += hist[(histI - 1 - i + RISE_HIST) % RISE_HIST];
+    return sum / n;
+  }
+
+  // A drop counts unless the cooldown is on. Either way, back to listening.
+  void fire(float jumpDb, float buildS, bool surge) {
+    if (now >= cooldownUntil) {
+      S.drops++;
+      S.lastJumpDb = jumpDb;
+      S.lastBuildS = buildS;
+      S.lastSurge = surge;
+      cooldownUntil = now + (uint32_t)(P.cooldownS * 1000);
+    } else {
+      S.blocked++;
+    }
+    phase = LISTEN; candidate = false; holdRun = 0; gapAt = 0;
+  }
 
   // The lowest bass level in the last ms milliseconds (the window's own
   // 300 ms included, so a slam that the window smears still counts).
@@ -300,18 +337,24 @@ private:
         bool back = L >= base - P.returnDb && L >= bd + P.jumpDb && L >= recentMin(P.riseMs) + P.riseDb && !silent;
         holdRun = back && sharp ? holdRun + 1 : 0;
         if (holdRun >= HOLD_BLOCKS) {
-          if (now >= cooldownUntil) {
-            S.drops++;
-            S.lastJumpDb = L - bd;
-            S.lastBuildS = (lastQuiet - quietStart) / 1000.0f;
-            cooldownUntil = now + (uint32_t)(P.cooldownS * 1000);
-          }
-          phase = LISTEN; candidate = false; holdRun = 0;
+          fire(L - bd, (lastQuiet - quietStart) / 1000.0f, false);
         } else if (now - lastQuiet > (P.riseMs > P.graceMs ? P.riseMs : P.graceMs)) {
           phase = LISTEN; candidate = false;   // came back slowly, or went silent: not a drop
         }
         break;
       }
+    }
+
+    // Gap and surge. A gap only counts with the bass in before it (armed),
+    // so a track's first beat after an intro without bass isn't one.
+    if (phase != WARMUP && armed && !silent && !tooQuiet && L < base - P.gapDb) {
+      if (!gapAt || L < gapL) gapL = L;
+      gapAt = now;
+    }
+    if (gapAt && now - gapAt > P.surgeWinMs) gapAt = 0;
+    if (gapAt && phase == LISTEN && now - gapAt >= 1000) {
+      float m = recentMean(1000);   // the whole second after the gap
+      if (m >= base + P.surgeDb && !silent) fire(m - gapL, 0, true);
     }
 
     S.phase = phase;

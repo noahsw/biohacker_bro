@@ -33,8 +33,8 @@ I2SClass i2s;
 drop::Detector det;             // only the task touches it after start
 
 // loop()'s side.
-uint32_t seenDrops = 0, burstStart = 0;
-bool bursting = false;
+uint32_t seenDrops = 0, seenBlocked = 0, burstStart = 0, ringStart = 0, lastDrawMs = 0;
+bool bursting = false, ringOn = false;
 dropfx::Meter meter;
 uint32_t meterMs = 0, lastLog = 0;
 dropfx::Frame frame;
@@ -190,12 +190,19 @@ void dropSetup() {
 void dropSetEnabled(bool on) {
   enabled = on;
   if (on) start();
-  if (!on) bursting = false;
+  if (!on) { bursting = false; ringOn = false; }
+}
+
+int dropRingAgeMs() {
+  if (!ringOn) return -1;
+  uint32_t age = millis() - ringStart;
+  if (age >= DROP_RING_MS + (DROP_RING_COUNT - 1) * DROP_RING_GAP_MS) { ringOn = false; return -1; }
+  return (int)age;
 }
 
 bool dropEnabled() { return enabled; }
 
-bool dropDraw(CRGB *leds, uint8_t wheelBrightness, uint32_t capMw) {
+bool dropDraw(CRGB *leds, uint8_t wheelBrightness, uint32_t capMw, bool hrShowing) {
   if (!started || RING_COLS != dropfx::COLS) return false;   // four-panel layout only
   if (!enabled && !DROP_TEST_MODE) return false;
 
@@ -217,27 +224,44 @@ bool dropDraw(CRGB *leds, uint8_t wheelBrightness, uint32_t capMw) {
   }
 
   uint32_t now = millis();
+  // Not called for a while (lights off): a drop from then is stale.
+  bool fresh = now - lastDrawMs < 200;
+  lastDrawMs = now;
   if (ok && s.drops != seenDrops) {
     seenDrops = s.drops;
-    bursting = enabled || DROP_TEST_MODE;
-    burstStart = now;
-    Serial.printf("drop: DROP! bass back +%.1f dB after %.1f s out (drop %lu)\r\n", s.lastJumpDb, s.lastBuildS,
-                  (unsigned long)s.drops);
+    const char *why = "";
+    if (DROP_TEST_MODE) { bursting = true; burstStart = now; }
+    else if (!enabled) why = " (bursts off)";
+    else if (!fresh) why = " (ignored: lights were off)";
+    else if (!hrShowing) why = " (ignored: a show is on)";
+    else if (DROP_ANIM == 1) { bursting = true; burstStart = now; }
+    else { ringOn = true; ringStart = now; }
+    if (s.lastSurge)
+      Serial.printf("drop: DROP! bass surged after a gap, +%.1f dB on it (drop %lu)%s\r\n", s.lastJumpDb,
+                    (unsigned long)s.drops, why);
+    else
+      Serial.printf("drop: DROP! bass back +%.1f dB after %.1f s out (drop %lu)%s\r\n", s.lastJumpDb, s.lastBuildS,
+                    (unsigned long)s.drops, why);
   }
+  if (ok && s.blocked != seenBlocked) {
+    seenBlocked = s.blocked;
+    Serial.printf("drop: a drop, skipped: %.0f s of cooldown left\r\n", s.cooldownS);
+  }
+  if (!hrShowing && !DROP_TEST_MODE) { bursting = false; ringOn = false; }   // a show took over
 
   bool drew = false;
+  if ((DROP_TEST_MODE || DROP_LOG) && now - lastLog >= 250) {
+    lastLog = now;
+    Serial.printf("drop: %-9s bass %6.1f dB  base %6.1f (%+5.1f)  all %6.1f / %6.1f  peak %5.1f dBFS%s  gain %d  out %4.1f s"
+                  "  cooldown %3.0f s  drops %lu  read_err %lu\r\n",
+                  phaseName(s), s.bassDb, s.baseDb, s.bassDb - s.baseDb, s.fullDb, s.fullBaseDb, s.peakDb,
+                  s.clipping ? " CLIP" : "", gainStep * GAIN_STEP_DB, s.quietS, s.cooldownS,
+                  (unsigned long)s.drops, (unsigned long)readErrors);
+  }
   if (DROP_TEST_MODE) {
     if (s.ms != meterMs) { meterMs = s.ms; meter.push(s); }
     dropfx::meter(meter, s, DROP_QUIET_DB, gainStep * GAIN_STEP_DB, now, ok, frame);
     drew = true;
-    if (now - lastLog >= 250) {
-      lastLog = now;
-      Serial.printf("drop: %-9s bass %6.1f dB  base %6.1f (%+5.1f)  all %6.1f / %6.1f  peak %5.1f dBFS%s  gain %d  out %4.1f s"
-                    "  cooldown %3.0f s  drops %lu  read_err %lu\r\n",
-                    phaseName(s), s.bassDb, s.baseDb, s.bassDb - s.baseDb, s.fullDb, s.fullBaseDb, s.peakDb,
-                    s.clipping ? " CLIP" : "", gainStep * GAIN_STEP_DB, s.quietS, s.cooldownS,
-                    (unsigned long)s.drops, (unsigned long)readErrors);
-    }
   } else if (bursting) {
     for (int y = 0; y < dropfx::ROWS; y++)
       for (int x = 0; x < dropfx::COLS; x++) {
