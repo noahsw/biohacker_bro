@@ -277,9 +277,9 @@ static void drawFace(int bpm, bool connected, bool peak, CRGB heartRgb,
     textColor = CRGB::Black;
   }
 
-  // Beat drop: white rings spread out from the heart over the dark pixels,
-  // one after another, the beat ripple's shape (audio_drop.h starts them;
-  // only on the heart rate).
+  // Beat drop: rings in the heart's colour spread out from it over the dark
+  // pixels, one after another, so the heart looks like it bursts (the beat
+  // ripple's shape; audio_drop.h starts them; only on the heart rate).
   int dropAge = dropRingAgeMs();
   for (int k = 0; dropAge >= 0 && k < DROP_RING_COUNT; k++) {
     int age = dropAge - k * DROP_RING_GAP_MS;
@@ -291,7 +291,11 @@ static void drawFace(int bpm, bool connected, bool peak, CRGB heartRgb,
       for (int x = 0; x < face::W; x++) {
         float dx = x - face::HEART_CX, dy = y - face::HEART_CY;
         float d = sqrtf(dx * dx + dy * dy);
-        if (fabsf(d - r) < DROP_RING_WIDTH && !faceBuf[y][x]) faceBuf[y][x] = CRGB(v, v, v);
+        if (fabsf(d - r) < DROP_RING_WIDTH && !faceBuf[y][x]) {
+          CRGB c = heartRgb;
+          c.nscale8_video(v);
+          faceBuf[y][x] = c;
+        }
       }
   }
 

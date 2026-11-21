@@ -299,8 +299,8 @@
 #define DROP_JUMP_DB       10    // the drop: bass jumps back at least this much, fast
 #define DROP_COOLDOWN_S    30    // no second drop for this long (a song's second drop can come ~30 s after its first)
 #define DROP_MIN_LEVEL_DB  -80   // usual bass must be above this (dB, gain taken off): ignores a quiet room
-// What a drop looks like. 0: the white ring (the old beat ripple, section 4,
-// in white and brighter). 1: the ~2.6 s rainbow burst from testing, over the
+// What a drop looks like. 0: rings in the heart's colour bursting out of it
+// (the old beat ripple, section 4, brighter). 1: the ~2.6 s rainbow burst from testing, over the
 // heart rate (white flash, rainbow shock bands, spinning stripes).
 #ifndef DROP_ANIM
 #define DROP_ANIM 0
@@ -310,3 +310,9 @@
 #define DROP_RING_COUNT    2     // rings, one after another (3 looked busy)
 #define DROP_RING_GAP_MS   400   // between one ring starting and the next
 #define DROP_RING_WIDTH    1.0f  // half the ring's thickness, pixels (the beat ripple was 0.7)
+// DROP_DEMO 1: play the drop animation every DROP_DEMO_MS on the heart rate,
+// music or not, to dial in the look. Not for the show.
+#ifndef DROP_DEMO
+#define DROP_DEMO 0
+#endif
+#define DROP_DEMO_MS       2500

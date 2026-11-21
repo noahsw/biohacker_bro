@@ -408,9 +408,11 @@ line). A drop is the bass gone for at least 2 s while the music carries on (a
 breakdown and build), then back within 0.7 s, 10 dB or more above where the
 breakdown sat. Or the other way house does it: the build keeps some bass,
 the bass cuts out for a moment (even half a second), then comes back louder
-than the groove ever was, 5 dB over usual for a whole second. On a drop two white rings spread out from the heart on every
-face, one after another, over the dark pixels (about 1.2 s in all): the old
-beat ripple, in white, thicker, slower and brighter. Only while the heart rate is showing: a drop during a show or with
+than the groove ever was, 5 dB over usual for a whole second. On a drop two rings in the heart's colour spread out from the
+heart on every face, one after another, over the dark pixels (about 1.2 s in
+all), so the heart looks like it bursts: the old beat ripple, thicker, slower
+and brighter. `DROP_DEMO 1` plays it every 2.5 s, music or not, to dial in
+the look. Only while the heart rate is showing: a drop during a show or with
 the lights off is ignored (the serial log says so). At most one every 30 s;
 a drop inside that is logged as skipped.
 

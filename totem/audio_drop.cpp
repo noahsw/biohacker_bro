@@ -203,6 +203,15 @@ int dropRingAgeMs() {
 bool dropEnabled() { return enabled; }
 
 bool dropDraw(CRGB *leds, uint8_t wheelBrightness, uint32_t capMw, bool hrShowing) {
+  if (DROP_DEMO && hrShowing && !ringOn && !bursting) {   // dialling in the look: a drop every DROP_DEMO_MS
+    static uint32_t lastDemo = 0;
+    uint32_t t = millis();
+    if (t - lastDemo >= DROP_DEMO_MS) {
+      lastDemo = t;
+      if (DROP_ANIM == 1) { bursting = true; burstStart = t; }
+      else { ringOn = true; ringStart = t; }
+    }
+  }
   if (!started || RING_COLS != dropfx::COLS) return false;   // four-panel layout only
   if (!enabled && !DROP_TEST_MODE) return false;
 
