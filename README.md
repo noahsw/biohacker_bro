@@ -445,6 +445,43 @@ ring in normal running too. `dropSetEnabled()`
 turns it on or off at run time. The detector and drawings are host-tested
 against a synthetic trance track (`tests/test_drop_detect.cpp`).
 
+### Totem music BPM (`totem/tempo_detect.h`, `totem/music_face.h`)
+
+The same mics also work out the song's tempo, and the totem shows it as a
+readout of its own beside the heart rates: a beat counter on the top row
+(1-2-3-4), a music note pulsing on the song's beats where the heart would
+be, and the BPM, all in electric blue, so it can't be mistaken for a heart.
+
+How it gets the tempo: the kick drum's band (40-200 Hz) is turned into an
+onset envelope at 100 Hz (each 10 ms, how much louder it got), and every
+quarter second the last 8 s of that is autocorrelated. The best period
+scores its own lag plus half its double and a quarter of its half, with a
+gentle pull toward 126 BPM, and is folded into 88-175 BPM. So half-time
+dubstep at 140 reads 140, and a 70 BPM track also reads 140. A number only
+goes up once 2 s of confident guesses agree within 1.5 BPM; after that it
+follows slow drift, switches after 4 s of a clearly new tempo, and holds the
+last number for 30 s through a breakdown with no kick before it gives up.
+Silence hides it straight away. The beat clock is phase-locked to the
+kicks, so the note flashes on the beat, not just at the right rate.
+
+Who shows where (`music::pick`): you, a friend and the music are three
+readouts evenly spaced round the ring, drifting 2 columns a second so every
+side of the crowd sees all three. Any two are on alternate panels, as the
+friend layout always was. One is on all four. With nobody live it's your
+heart, searching, as before. Your strap dropping out takes you out of the
+list, so it falls back to your friend and the music. Changes cross-fade
+over 0.7 s.
+
+Settings are section 10 of `totem/totem_config.h`. `MUSIC_BPM 0` turns it
+off (the layouts are then exactly as before). `MUSIC_TEST_MODE 1` shows only
+the music readout, with how sure the tracker is on the top row (red under
+the white line, green over it), the unlocked guess in grey, and a
+`music:` line on serial twice a second. `MUSIC_ICON 1` swaps the note for a
+speaker. `MUSIC_BEAT_LEAD_MS` moves the flash earlier or later if it looks
+off the beat. Host-tested against synthetic house, trance, drum and bass and
+half-time tracks, crowd noise, clipping and breakdowns
+(`tests/test_tempo_detect.cpp`, `tests/test_music_face.cpp`).
+
 ## Host-side tests
 
 ```bash

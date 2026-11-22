@@ -332,3 +332,37 @@
 #define DROP_DEMO 0
 #endif
 #define DROP_DEMO_MS       2500
+
+// --- 10. Music BPM: the song's tempo, with a note, beside the heart rates ---
+// The same mics listen for the kick drum and work out the song's tempo
+// (tempo_detect.h). Once it's sure (a couple of seconds of the same answer)
+// the music gets a readout of its own: a note pulsing on the song's beats, a
+// 1-2-3-4 beat counter on top, and the BPM, all in MUSIC_RGB. It joins your
+// heart rate and your friend's (music_face.h has the layouts):
+//   you + friend + music: three readouts spaced round the ring, drifting
+//                         slowly so every side sees all three
+//   any two:              alternate panels, still (as you + friend always was)
+//   one:                  all four panels
+// Through a breakdown (no kick) it keeps the number and the beat for up to
+// MUSIC_HOLD_S. Silence, chatter or crowd noise with no beat: no music readout.
+// The number is always 88-175: a 70 BPM groove shows as 140, as DJs count it.
+//
+// 0 = no music readout (the faces are exactly as before).
+// MUSIC_TEST_MODE 1: the music readout on all four panels all the time, its
+// top row a "how sure" bar (red under MUSIC_CONF_MIN, green over), the number
+// grey while it's only guessing, and a "music: ..." serial line twice a second.
+#ifndef MUSIC_BPM
+#define MUSIC_BPM 1
+#endif
+#ifndef MUSIC_TEST_MODE
+#define MUSIC_TEST_MODE 0
+#endif
+#ifndef MUSIC_ICON
+#define MUSIC_ICON          0      // 0 = a pair of music notes, 1 = a speaker
+#endif
+#define MUSIC_RGB           CRGB(0, 180, 255)   // electric blue: away from your pink, your friend's purple and the zone colours
+#define MUSIC_TRIO_PX_PER_S 2.0f   // the three-readout drift, columns a second (64 = once round in 32 s)
+#define MUSIC_FADE_MS       700    // cross-fade when a readout joins or leaves
+#define MUSIC_BEAT_LEAD_MS  50     // light the note this much before the mics hear the kick (the audio buffer and the LEDs' update); more if it flashes late
+#define MUSIC_CONF_MIN      0.30f  // how sure (0-1) a tempo guess must be to count; lower locks on more but wronger
+#define MUSIC_HOLD_S        30     // no beat for this long (a long breakdown, the set ended): the music readout goes

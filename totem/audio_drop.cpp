@@ -8,6 +8,7 @@
 #include "brightness.h"
 #include "drop_detect.h"
 #include "drop_fx.h"
+#include "tempo_detect.h"
 
 namespace {
 
@@ -31,6 +32,10 @@ bool started = false, ok = false;
 const char *failWhy = "";
 I2SClass i2s;
 drop::Detector det;             // only the task touches it after start
+tempo::Tracker tempoT;          // the same
+tempo::Snapshot tempoShared;    // its latest, copied out under mux...
+uint32_t tempoSharedAt = 0;     // ...and the millis() it was copied at
+const bool MUSIC_ON = MUSIC_BPM || MUSIC_TEST_MODE;
 
 // loop()'s side.
 uint32_t seenDrops = 0, seenBlocked = 0, burstStart = 0, ringStart = 0, lastDrawMs = 0;
@@ -127,6 +132,14 @@ drop::Params params() {
   return p;
 }
 
+tempo::Params tempoParams() {
+  tempo::Params p;
+  p.confMin = MUSIC_CONF_MIN;
+  p.holdS = MUSIC_HOLD_S;
+  p.minLevelDb = DROP_MIN_LEVEL_DB;
+  return p;
+}
+
 int clampStep(int s) {
   const int lo = DROP_GAIN_MIN_DB / GAIN_STEP_DB, hi = DROP_GAIN_MAX_DB / GAIN_STEP_DB;
   return s < lo ? lo : s > hi ? hi : s > 11 ? 11 : s < 0 ? 0 : s;
@@ -142,11 +155,14 @@ void audioTask(void *) {
     // task outranks the Bluetooth one on core 0, so without the pause a dead
     // I2S link would spin here and starve the strap reconnects.
     if (got < sizeof(buf)) { readErrors++; vTaskDelay(pdMS_TO_TICKS(10)); continue; }
-    if (gainChanged) { gainChanged = false; stepNow = gainStep; det.noteGainChange(); }
+    if (gainChanged) { gainChanged = false; stepNow = gainStep; det.noteGainChange(); tempoT.noteGainChange(); }
     det.feed(buf, drop::Detector::BLOCK, (float)(stepNow * GAIN_STEP_DB));
+    if (MUSIC_ON) tempoT.feed(buf, drop::Detector::BLOCK, (float)(stepNow * GAIN_STEP_DB));
     int adv = DROP_AUTO_GAIN ? det.gainAdvice() : 0;
+    uint32_t at = millis();
     taskENTER_CRITICAL(&mux);
     shared = det.snapshot();
+    if (MUSIC_ON) { tempoShared = tempoT.snapshot(); tempoSharedAt = at; }
     if (adv) wantStep = clampStep(stepNow + adv);
     taskEXIT_CRITICAL(&mux);
   }
@@ -169,9 +185,12 @@ void start() {
   if (ok) ok = es7210Init(step);   // MCLK is running now
   if (ok) {
     det.begin(params());
-    xTaskCreatePinnedToCore(audioTask, "drop", 4096, nullptr, 2, nullptr, 0);
-    Serial.printf("drop: mics on, gain %d dB, %s%s\r\n", step * GAIN_STEP_DB, enabled ? "detection on" : "detection off",
-                  DROP_TEST_MODE ? ", TEST MODE (meter)" : "");
+    tempoT.begin(tempoParams());
+    // 6 KB: the tempo tracker's scoring keeps ~1 KB of scratch on the stack.
+    xTaskCreatePinnedToCore(audioTask, "drop", 6144, nullptr, 2, nullptr, 0);
+    Serial.printf("drop: mics on, gain %d dB, %s%s%s\r\n", step * GAIN_STEP_DB, enabled ? "detection on" : "detection off",
+                  DROP_TEST_MODE ? ", TEST MODE (meter)" : "",
+                  MUSIC_TEST_MODE ? ", music BPM TEST MODE" : MUSIC_BPM ? ", music BPM on" : "");
   } else {
     Serial.printf("drop: mics FAILED: %s. Drop detection stays off.\r\n", failWhy);
   }
@@ -187,7 +206,7 @@ const char *phaseName(const drop::Snapshot &s) {
 } // namespace
 
 void dropSetup() {
-  if (DROP_ENABLED || DROP_TEST_MODE) start();
+  if (DROP_ENABLED || DROP_TEST_MODE || MUSIC_ON) start();
 }
 
 void dropSetEnabled(bool on) {
@@ -216,7 +235,6 @@ bool dropDraw(CRGB *leds, uint8_t wheelBrightness, uint32_t capMw, bool hrShowin
     }
   }
   if (!started || RING_COLS != dropfx::COLS) return false;   // four-panel layout only
-  if (!enabled && !DROP_TEST_MODE) return false;
 
   drop::Snapshot s;
   int want = 0;
@@ -226,6 +244,7 @@ bool dropDraw(CRGB *leds, uint8_t wheelBrightness, uint32_t capMw, bool hrShowin
   taskEXIT_CRITICAL(&mux);
 
   // Mic gain: the task asks, loop() does the I2C (the wheel uses the bus too).
+  // Before the check below: the music BPM needs it even with drops off.
   if (ok && want != gainStep) {
     if (es7210SetGain(want)) {
       Serial.printf("drop: mic gain %d -> %d dB (%s)\r\n", gainStep * GAIN_STEP_DB, want * GAIN_STEP_DB,
@@ -234,6 +253,7 @@ bool dropDraw(CRGB *leds, uint8_t wheelBrightness, uint32_t capMw, bool hrShowin
       gainChanged = true;
     }
   }
+  if (!enabled && !DROP_TEST_MODE) return false;
 
   uint32_t now = millis();
   // Not called for a while (lights off): a drop from then is stale.
@@ -303,4 +323,70 @@ void dropPrintStatus() {
   taskEXIT_CRITICAL(&mux);
   Serial.printf("drop: %s, bass %+.0f dB vs usual, gain %d dB, %lu drops so far%s\r\n", phaseName(s),
                 s.bassDb - s.baseDb, gainStep * GAIN_STEP_DB, (unsigned long)s.drops, enabled ? "" : " (bursts off)");
+}
+
+// ---- Music BPM -----------------------------------------------------------------
+
+namespace {
+tempo::Snapshot musicSnap(uint32_t &at) {
+  tempo::Snapshot t;
+  taskENTER_CRITICAL(&mux);
+  t = tempoShared;
+  at = tempoSharedAt;
+  taskEXIT_CRITICAL(&mux);
+  return t;
+}
+}  // namespace
+
+bool musicNow(MusicNow &m) {
+  m = MusicNow();
+  if (!MUSIC_ON || !started || !ok) return false;
+  uint32_t at;
+  tempo::Snapshot t = musicSnap(at);
+  m.rawBpm = t.rawBpm;
+  m.conf = t.conf;
+  m.confMin = MUSIC_CONF_MIN;
+  if (!t.locked || t.periodMs <= 0) return true;
+  m.live = true;
+  m.bpm = t.shown;
+  // The beat the tracker last predicted, on millis(): the snapshot was taken
+  // at `at`, when the audio clock read t.ms. Lit MUSIC_BEAT_LEAD_MS early to
+  // make up for the sound sitting in the audio buffer and the LEDs' update.
+  uint32_t now = millis();
+  int32_t beat = (int32_t)(at - (t.ms - t.lastBeatMs)) - MUSIC_BEAT_LEAD_MS;
+  uint32_t beats = t.beats;
+  uint32_t per = (uint32_t)(t.periodMs + 0.5f);
+  // Run the beat clock on to now: the tracker's next snapshot is up to 20 ms
+  // away, and this is read every frame.
+  while ((int32_t)(now - (uint32_t)beat) >= (int32_t)per) { beat += (int32_t)per; beats++; }
+  m.lastBeat = (uint32_t)beat;
+  m.beats = beats;
+  return true;
+}
+
+void musicPrintStatus() {
+  if (!MUSIC_ON || !started) return;
+  if (!ok) return;   // dropPrintStatus() already says why
+  uint32_t at;
+  tempo::Snapshot t = musicSnap(at);
+  if (t.locked)
+    Serial.printf("music: %d BPM%s (sure %.2f, kick band %.0f dB)\r\n", t.shown,
+                  t.sinceGoodS > 1 ? ", holding through a breakdown" : "", t.conf, t.levelDb);
+  else if (t.rawBpm > 0)
+    Serial.printf("music: listening, best guess %.1f BPM but only %.2f sure (needs %.2f)\r\n", t.rawBpm, t.conf,
+                  (float)MUSIC_CONF_MIN);
+  else
+    Serial.printf("music: listening (kick band %.0f dB)\r\n", t.levelDb);
+}
+
+void musicLog() {
+  static uint32_t last = 0;
+  if (!MUSIC_TEST_MODE || !started || !ok || millis() - last < 500) return;
+  last = millis();
+  uint32_t at;
+  tempo::Snapshot t = musicSnap(at);
+  Serial.printf("music: %-7s shown %3d  smooth %6.2f  guess %6.2f  sure %.2f%s  kick band %6.1f dB  since good %4.1f s"
+                "  beats %lu  locks %lu  gain %d\r\n",
+                t.locked ? "LOCKED" : "-", t.shown, t.bpm, t.rawBpm, t.conf, t.conf >= MUSIC_CONF_MIN ? "*" : " ",
+                t.levelDb, t.sinceGoodS, (unsigned long)t.beats, (unsigned long)t.locks, gainStep * GAIN_STEP_DB);
 }

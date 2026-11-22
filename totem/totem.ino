@@ -13,6 +13,13 @@
   on their beats; bar, number and colours otherwise the same as yours. If your
   Whoop drops out while a friend is live, all four faces show the friend.
 
+  MUSIC (MUSIC_BPM): the board's mics find the song's tempo from the kick
+  drum, and once they're sure it gets a readout of its own: a blue note
+  pulsing on the song's beats, a 1-2-3-4 beat counter, and the BPM. You, a
+  friend and the music make three readouts, spaced round the ring and
+  drifting slowly so every side sees all three; any two share the panels
+  alternately as above; one has all four (music_face.h, tempo_detect.h).
+
   SHOWS (faces layout): every 5 minutes the heart rate steps aside for one
   show, round and round: spin, a message, Queen Mary, so each comes every
   15 minutes, the messages in order (show_layout.h):
@@ -56,6 +63,7 @@
 #include "config.h"
 #include "totem_config.h"
 #include "face_layout.h"
+#include "music_face.h"
 #include "led_map.h"
 #include "hr_zones.h"
 #include "crew_ble.h"
@@ -232,6 +240,72 @@ static float heartRest(CRGB c) {
   return face::heartMinLevel(r, FastLED.getBrightness(), 0.18f);
 }
 
+// Beat drop: rings in `color` spread out from the heart's box over the dark
+// pixels, one after another, so the heart (or the music note) looks like it
+// bursts (the beat ripple's shape; audio_drop.h starts them; only on the
+// heart rate display, not in a show).
+static void drawDropRings(CRGB color) {
+  int dropAge = dropRingAgeMs();
+  for (int k = 0; dropAge >= 0 && k < DROP_RING_COUNT; k++) {
+    int age = dropAge - k * DROP_RING_GAP_MS;
+    if (age < 0 || age >= DROP_RING_MS) continue;
+    float r = 5.0f + 9.0f * age / DROP_RING_MS;
+    float fade = 1.0f - (float)age / DROP_RING_MS;
+    uint8_t v = (uint8_t)(DROP_RING_LEVEL * fade);
+    for (int y = 0; y < face::H; y++)
+      for (int x = 0; x < face::W; x++) {
+        float dx = x - face::HEART_CX, dy = y - face::HEART_CY;
+        float d = sqrtf(dx * dx + dy * dy);
+        if (fabsf(d - r) < DROP_RING_WIDTH && !faceBuf[y][x]) {
+          CRGB c = color;
+          c.nscale8_video(v);
+          faceBuf[y][x] = c;
+        }
+      }
+  }
+}
+
+// The number in rows 9..15, fading from the last one (BPM_FADE_MS), or the
+// brightness pips for two seconds after a wheel change. st is per readout.
+static void drawNumber(const int *glyphs, int n, CRGB textColor, bool peak, face::FaceState &st) {
+  // A new number (or colour) starts a fade from whatever was showing. The
+  // power-measuring frame draws 188 and leaves this alone.
+  if (!peak && (n != st.n || memcmp(glyphs, st.glyphs, n * sizeof(int)) != 0 || textColor != toCrgb(st.color))) {
+    memcpy(st.oldGlyphs, st.glyphs, sizeof(st.glyphs));
+    st.oldN = st.n;
+    st.oldColor = st.color;
+    memcpy(st.glyphs, glyphs, n * sizeof(int));
+    st.n = n;
+    st.color = {textColor.r, textColor.g, textColor.b};
+    st.changedAt = millis();
+  }
+
+  // Brightness pips replace the number for two seconds after a wheel change.
+  if (millis() < indicatorUntil && indicatorCount > 0) {
+    int x0 = (face::W - (indicatorCount * 3 - 1)) / 2;
+    for (int i = 0; i < indicatorCount; i++)
+      for (int dx = 0; dx < 2; dx++)
+        for (int y = 12; y < 14; y++)
+          faceBuf[y][x0 + i * 3 + dx] = i <= indicatorLevel ? CRGB(220, 220, 220) : CRGB(30, 30, 30);
+    return;
+  }
+
+  if (peak) {
+    for (int y = 0; y < face::H; y++)
+      for (int x = 0; x < face::W; x++)
+        if (face::textAt(glyphs, n, x, y)) faceBuf[y][x] = textColor;
+    return;
+  }
+  unsigned long age = millis() - st.changedAt;
+  uint8_t t = BPM_FADE_MS > 0 && age < BPM_FADE_MS ? (uint8_t)(255 * age / BPM_FADE_MS) : 255;
+  for (int y = face::DIGIT_Y; y < face::H; y++)
+    for (int x = 0; x < face::W; x++) {
+      bool a = t < 255 && face::textAt(st.oldGlyphs, st.oldN, x, y);
+      bool b = face::textAt(st.glyphs, st.n, x, y);
+      if (a || b) faceBuf[y][x] = blend(a ? toCrgb(st.oldColor) : CRGB::Black, b ? toCrgb(st.color) : CRGB::Black, t);
+    }
+}
+
 static void drawFace(int bpm, bool connected, bool peak, CRGB heartRgb,
                      unsigned long lastBeat, face::FaceState &st) {
   int &barFill = st.barFill;
@@ -297,64 +371,73 @@ static void drawFace(int bpm, bool connected, bool peak, CRGB heartRgb,
     textColor = CRGB::Black;
   }
 
-  // Beat drop: rings in the heart's colour spread out from it over the dark
-  // pixels, one after another, so the heart looks like it bursts (the beat
-  // ripple's shape; audio_drop.h starts them; only on the heart rate).
-  int dropAge = dropRingAgeMs();
-  for (int k = 0; dropAge >= 0 && k < DROP_RING_COUNT; k++) {
-    int age = dropAge - k * DROP_RING_GAP_MS;
-    if (age < 0 || age >= DROP_RING_MS) continue;
-    float r = 5.0f + 9.0f * age / DROP_RING_MS;
-    float fade = 1.0f - (float)age / DROP_RING_MS;
-    uint8_t v = (uint8_t)(DROP_RING_LEVEL * fade);
-    for (int y = 0; y < face::H; y++)
-      for (int x = 0; x < face::W; x++) {
-        float dx = x - face::HEART_CX, dy = y - face::HEART_CY;
-        float d = sqrtf(dx * dx + dy * dy);
-        if (fabsf(d - r) < DROP_RING_WIDTH && !faceBuf[y][x]) {
-          CRGB c = heartRgb;
-          c.nscale8_video(v);
-          faceBuf[y][x] = c;
-        }
-      }
+  drawDropRings(heartRgb);
+
+  drawNumber(glyphs, n, textColor, peak, st);
+}
+
+// ---------------------------------------------------------------------------
+// The music's readout (music_face.h): a beat counter, a note pulsing on the
+// song's beats, and its BPM, all in MUSIC_RGB
+// ---------------------------------------------------------------------------
+
+// A bar pixel never rounds to black at low brightness (as drawZoneBar).
+static CRGB liftToFloor(CRGB p) {
+  uint8_t floorV = face::visibleFloor(FastLED.getBrightness());
+  uint8_t m = max(p.r, max(p.g, p.b));
+  if (m > 0 && m < floorV) {
+    p.r = (uint16_t)p.r * floorV / m; p.g = (uint16_t)p.g * floorV / m; p.b = (uint16_t)p.b * floorV / m;
+  }
+  return p;
+}
+
+// peak: the brightest this frame can get (note at full, whole bar lit, a white
+// "188", as drawFace), for limitBrightness() to measure.
+static void drawMusicFace(bool peak, const MusicNow &m, face::FaceState &st) {
+  for (int y = 0; y < face::H; y++)
+    for (int x = 0; x < face::W; x++) faceBuf[y][x] = CRGB::Black;
+  const CRGB col = MUSIC_RGB;
+
+  // Row 0: the beat counter, 1-2-3-4 (four pixels a beat) over a dim legend.
+  // Test mode: how sure the tempo guess is instead, red under the line.
+  int fill = peak ? face::W : m.live ? music::beatBarFill(m.beats) : 0;
+  CRGB barCol = col;
+  if (MUSIC_TEST_MODE && !peak) {
+    fill = (int)(m.conf * face::W + 0.5f);
+    barCol = m.conf >= m.confMin ? CRGB(0, 255, 60) : CRGB(255, 30, 30);
+  }
+  for (int x = 0; x < face::W; x++) {
+    CRGB p = barCol;
+    if (x >= fill) p.nscale8_video(56);   // ~22%: the unlit legend, as the zone bar
+    faceBuf[face::BAR_Y][x] = liftToFloor(p);
+  }
+  if (MUSIC_TEST_MODE && !peak) {   // the line it has to clear
+    int lx = (int)(m.confMin * face::W + 0.5f);
+    if (lx >= 0 && lx < face::W) faceBuf[face::BAR_Y][lx] = CRGB(200, 200, 200);
   }
 
-  // A new number (or colour) starts a fade from whatever was showing. The
-  // power-measuring frame draws 188 and leaves this alone.
-  if (!peak && (n != st.n || memcmp(glyphs, st.glyphs, n * sizeof(int)) != 0 || textColor != toCrgb(st.color))) {
-    memcpy(st.oldGlyphs, st.glyphs, sizeof(st.glyphs));
-    st.oldN = st.n;
-    st.oldColor = st.color;
-    memcpy(st.glyphs, glyphs, sizeof(glyphs));
-    st.n = n;
-    st.color = {textColor.r, textColor.g, textColor.b};
-    st.changedAt = millis();
-  }
+  // The note: a sharp flash on each beat, resting dim between, never dark.
+  float rest = heartRest(col);
+  float pulse = m.live ? expf(-(float)(millis() - m.lastBeat) / 130.0f) : 0.0f;
+  float lvl = peak ? 1.0f : rest + (1.0f - rest) * pulse;
+  CRGB icon = col;
+  icon.nscale8_video((uint8_t)(255 * lvl));
+  for (int y = 0; y < face::H; y++)
+    for (int x = 0; x < face::W; x++)
+      if (music::iconAt(MUSIC_ICON, x, y)) faceBuf[y][x] = icon;
 
-  // Brightness pips replace the number for two seconds after a wheel change.
-  if (millis() < indicatorUntil && indicatorCount > 0) {
-    int x0 = (face::W - (indicatorCount * 3 - 1)) / 2;
-    for (int i = 0; i < indicatorCount; i++)
-      for (int dx = 0; dx < 2; dx++)
-        for (int y = 12; y < 14; y++)
-          faceBuf[y][x0 + i * 3 + dx] = i <= indicatorLevel ? CRGB(220, 220, 220) : CRGB(30, 30, 30);
-    return;
-  }
+  drawDropRings(col);
 
-  if (peak) {
-    for (int y = 0; y < face::H; y++)
-      for (int x = 0; x < face::W; x++)
-        if (face::textAt(glyphs, n, x, y)) faceBuf[y][x] = textColor;
-    return;
+  int glyphs[3];
+  int n = 0;
+  CRGB textColor = col;
+  if (peak) { n = face::bpmGlyphs(188, glyphs); textColor = CRGB(255, 255, 255); }
+  else if (m.live) n = face::bpmGlyphs(m.bpm, glyphs);
+  else if (MUSIC_TEST_MODE) {   // only guessing: the guess in grey, or "--"
+    n = face::bpmGlyphs(m.rawBpm > 0 ? (int)(m.rawBpm + 0.5f) : 0, glyphs);
+    textColor = CRGB(90, 90, 90);
   }
-  unsigned long age = millis() - st.changedAt;
-  uint8_t t = BPM_FADE_MS > 0 && age < BPM_FADE_MS ? (uint8_t)(255 * age / BPM_FADE_MS) : 255;
-  for (int y = face::DIGIT_Y; y < face::H; y++)
-    for (int x = 0; x < face::W; x++) {
-      bool a = t < 255 && face::textAt(st.oldGlyphs, st.oldN, x, y);
-      bool b = face::textAt(st.glyphs, st.n, x, y);
-      if (a || b) faceBuf[y][x] = blend(a ? toCrgb(st.oldColor) : CRGB::Black, b ? toCrgb(st.color) : CRGB::Black, t);
-    }
+  drawNumber(glyphs, n, textColor, peak, st);
 }
 
 // ---------------------------------------------------------------------------
@@ -477,15 +560,6 @@ static void blitRing() {
     for (int x = 0; x < ring::COLS; x++) leds[ringLedIndex(x, y)] = ringBuf[y][x];
 }
 
-static void blitFace(int f) {
-  for (int y = 0; y < face::H; y++)
-    for (int x = 0; x < face::W; x++) leds[ledIndex(f, x, y)] = faceBuf[y][x];
-}
-
-static void blitAllFaces() {
-  for (int f = 0; f < FACE_COUNT; f++) blitFace(f);
-}
-
 // The first friend whose strap is connected and sending, or -1.
 static int liveFriend() {
   for (int i = 0; i < crewCount; i++)
@@ -493,31 +567,107 @@ static int liveFriend() {
   return -1;
 }
 
-// Opposite sides: faces 0 and 2 show you, 1 and 3 your friend (purple heart).
-// Panels are chained round the ring in order, so even and odd faces sit
-// opposite each other. With no friend connected, all four show you.
-//
+// The heart rate display, round the whole ring (music_face.h has the layouts):
+//   you, a friend and the music: three readouts drifting round the ring
+//   any two: alternate panels, you (or the first) on the even ones
+//   one: on every panel
+//   nobody: your heart, searching, on every panel
 // If your Whoop drops out (taken off, out of range) while a friend's strap is
-// still live, all four faces show the friend instead of two idle hearts, so
-// the totem keeps going while you step away. This ignores CREW_FACES: it's
-// about not having dead faces, not about showing friends.
-static void drawAndBlitFaces(bool peak) {
-  static face::FaceState youFill, friendFill;
+// still live, the friend shows instead of an idle heart, so the totem keeps
+// going while you step away. That ignores CREW_FACES: it's about not having
+// dead faces, not about showing friends.
+//
+// When a readout joins or leaves (the music locks on, a strap drops), the old
+// layout cross-fades into the new over MUSIC_FADE_MS.
+static CRGB ringNow[face::H][RING_COLS];    // this frame
+static CRGB ringLast[face::H][RING_COLS];   // the last real (not power-measuring) frame
+static CRGB ringFrom[face::H][RING_COLS];   // what a cross-fade fades from
+static CRGB tiles[3][face::H][face::W];
+static music::Layout layoutNow;
+static bool layoutSet = false;
+static unsigned long layoutFadeAt = 0;     // when the cross-fade started (0 = none)
+
+static int ringPanelOfCol(int c) { return RING_REVERSE ? FACE_COUNT - 1 - c / face::W : c / face::W; }
+
+static music::Layout currentLayout(const MusicNow &m) {
+  if (MUSIC_TEST_MODE) { music::Layout L; L.mode = music::ALL; L.n = 1; L.k[0] = music::MUSIC; return L; }
   bool youLive = hrConnected && currentBPM > 0;
-  int fr = liveFriend();
-  if (!youLive && fr >= 0) {
-    if (!peak) advanceBeat(crew[fr].bpm, friendLastBeat, friendBeatCount);   // once per frame
-    drawFace(crew[fr].bpm, true, peak, HEART_RGB_FRIEND, friendLastBeat, friendFill);
-    blitAllFaces();
-    return;
+  return music::pick(youLive, liveFriend() >= 0, MUSIC_BPM && m.live, CREW_FACES);
+}
+
+static void composeNormalRing(bool peak) {
+  static face::FaceState youSt, friendSt, musicSt;
+  MusicNow m;
+  musicNow(m);
+  music::Layout L = currentLayout(m);
+  if (!peak) {
+    if (layoutSet && L != layoutNow && MUSIC_FADE_MS > 0) {
+      memcpy(ringFrom, ringLast, sizeof(ringFrom));
+      layoutFadeAt = millis() | 1;
+    }
+    layoutNow = L;
+    layoutSet = true;
   }
-  drawFace(currentBPM, hrConnected, peak, HEART_RGB_YOU, lastBeatTime, youFill);
-  if (!CREW_FACES) fr = -1;
-  if (fr < 0) { friendLastBeat = millis(); blitAllFaces(); return; }
-  for (int f = 0; f < FACE_COUNT; f += 2) blitFace(f);
-  if (!peak) advanceBeat(crew[fr].bpm, friendLastBeat, friendBeatCount);   // once per frame
-  drawFace(crew[fr].bpm, true, peak, HEART_RGB_FRIEND, friendLastBeat, friendFill);
-  for (int f = 1; f < FACE_COUNT; f += 2) blitFace(f);
+
+  int fr = liveFriend();
+  bool friendShown = false;
+  for (int i = 0; i < L.n; i++) {
+    switch (L.k[i]) {
+      case music::YOU:
+        drawFace(currentBPM, hrConnected, peak, HEART_RGB_YOU, lastBeatTime, youSt);
+        break;
+      case music::FRIEND:
+        if (!peak) advanceBeat(crew[fr].bpm, friendLastBeat, friendBeatCount);   // once per frame
+        drawFace(crew[fr].bpm, true, peak, HEART_RGB_FRIEND, friendLastBeat, friendSt);
+        friendShown = true;
+        break;
+      case music::MUSIC:
+        drawMusicFace(peak, m, musicSt);
+        break;
+    }
+    memcpy(tiles[i], faceBuf, sizeof(faceBuf));
+  }
+  if (!friendShown) friendLastBeat = millis();
+
+  float off = music::trioOffset(millis(), MUSIC_TRIO_PX_PER_S, RING_COLS);
+  for (int c = 0; c < RING_COLS; c++) {
+    int x = c % face::W;
+    if (L.mode == music::TRIO) {
+      int u0; float frac;
+      int t = music::trioAt(off, c, RING_COLS, u0, frac);
+      for (int y = 0; y < face::H; y++) {
+        if (t < 0) { ringNow[y][c] = CRGB::Black; continue; }
+        CRGB a = u0 >= 0 ? tiles[t][y][u0] : CRGB::Black;
+        CRGB b = u0 + 1 < face::W ? tiles[t][y][u0 + 1] : CRGB::Black;
+        ringNow[y][c] = blend(a, b, (uint8_t)(frac * 255 + 0.5f));
+      }
+    } else {
+      int t = L.mode == music::PAIR ? ringPanelOfCol(c) % 2 : 0;
+      for (int y = 0; y < face::H; y++) ringNow[y][c] = tiles[t][y][x];
+    }
+  }
+
+  if (layoutFadeAt) {
+    unsigned long age = millis() - layoutFadeAt;
+    if (age >= MUSIC_FADE_MS) layoutFadeAt = 0;
+    else {
+      uint8_t t = (uint8_t)(255 * age / MUSIC_FADE_MS);
+      for (int y = 0; y < face::H; y++)
+        for (int c = 0; c < RING_COLS; c++) {
+          const CRGB &f = ringFrom[y][c];
+          CRGB &n = ringNow[y][c];
+          if (peak) n = CRGB(max(f.r, n.r), max(f.g, n.g), max(f.b, n.b));   // the brighter of the two
+          else n = blend(f, n, t);
+        }
+    }
+  }
+  if (!peak) memcpy(ringLast, ringNow, sizeof(ringLast));
+}
+
+static void drawAndBlitFaces(bool peak) {
+  composeNormalRing(peak);
+  for (int y = 0; y < face::H; y++)
+    for (int c = 0; c < RING_COLS; c++) leds[ringLedIndex(c, y)] = ringNow[y][c];
 }
 
 // Orientation test: each face shows its chain number (0-3) upright in white,
@@ -580,32 +730,13 @@ static char showCustom[show::MAX_CHARS + 1];   // the phone's text, for the stat
 
 static Rgb toRgb(const CRGB &c) { return show::rgb(c.r, c.g, c.b); }
 
-// Ring column block k (16 columns, left to right seen from outside) is chain
-// panel ringBlockPanel(k): ringLedIndex() puts it there.
-static int ringBlockPanel(int k) { return RING_REVERSE ? FACE_COUNT - 1 - k : k; }
 
-// Copies faceBuf into the ring blocks showing you (even panels), your friend
-// (odd panels) or, with who < 0, all of them.
-static void faceToRing(show::Frame &ring, int who) {
-  for (int k = 0; k < FACE_COUNT; k++) {
-    int panel = ringBlockPanel(k);
-    if (who >= 0 && panel % 2 != who) continue;
-    for (int y = 0; y < face::H; y++)
-      for (int x = 0; x < face::W; x++) ring[y][k * face::W + x] = toRgb(faceBuf[y][x]);
-  }
-}
-
-// The heart rate display as the ring shows it now: the same faces, the same
-// sides, as drawAndBlitFaces().
+// The heart rate display as the ring shows it now (drawAndBlitFaces()), for
+// a show to fade from and back to.
 static void drawNormalRing(bool peak, show::Frame &ring) {
-  static face::FaceState youFill, friendFill;
-  drawFace(currentBPM, hrConnected, peak, HEART_RGB_YOU, lastBeatTime, youFill);
-  int fr = CREW_FACES ? liveFriend() : -1;
-  if (fr < 0) { friendLastBeat = millis(); faceToRing(ring, -1); return; }
-  faceToRing(ring, 0);
-  if (!peak) advanceBeat(crew[fr].bpm, friendLastBeat, friendBeatCount);   // once per frame
-  drawFace(crew[fr].bpm, true, peak, HEART_RGB_FRIEND, friendLastBeat, friendFill);
-  faceToRing(ring, 1);
+  composeNormalRing(peak);
+  for (int y = 0; y < face::H; y++)
+    for (int c = 0; c < RING_COLS; c++) ring[y][c] = toRgb(ringNow[y][c]);
 }
 
 static void blitShowFrame(const show::Frame &f) {
@@ -914,7 +1045,9 @@ static void handlePhone() {
   for (int i = 0; i < crewCount; i++)
     o.add("%s{\"i\":\"%c\",\"on\":%d,\"bpm\":%d}", i ? "," : "", crew[i].initial,
           crew[i].connected ? 1 : 0, crew[i].connected ? crew[i].bpm : 0);
-  o.add("],\"bright\":%d,\"power\":%d", brightnessLevel(), lightsOn ? 1 : 0);
+  MusicNow mn;
+  musicNow(mn);
+  o.add("],\"bright\":%d,\"power\":%d,\"music\":%d", brightnessLevel(), lightsOn ? 1 : 0, mn.live ? mn.bpm : 0);
   showStatusJson(o);
   strcat(j, "}");
   phoneSetStatus(j);
@@ -990,6 +1123,7 @@ void loop() {
 #endif
 #if !TOTEM_ORIENTATION_TEST && !TOTEM_RING
     dropDraw(leds, wheelBrightness, ledCapMa() * 5, hrShowing);   // drops: starts the ring; test mode's meter
+    musicLog();   // MUSIC_TEST_MODE's serial line
 #endif
     FastLED.show();   // ~23 ms for 768 LEDs (31 ms for the cube's 1024): 30+ fps
   }
@@ -1009,6 +1143,7 @@ void loop() {
     Serial.printf("heap: free=%lu  min=%lu  largest=%lu  up=%lus\r\n", (unsigned long)ESP.getFreeHeap(),
                   (unsigned long)ESP.getMinFreeHeap(), (unsigned long)ESP.getMaxAllocHeap(), millis() / 1000);
     dropPrintStatus();
+    musicPrintStatus();
     lastStatus = millis();
   }
   brightnessWait(2);

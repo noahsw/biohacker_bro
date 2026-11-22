@@ -26,7 +26,8 @@
 //   (The ES8311 at 0x18 drives the speaker output; it isn't used.)
 
 // From setup(), after Wire.begin() and brightnessSetup(). Starts the mics if
-// DROP_ENABLED or DROP_TEST_MODE is set; otherwise does nothing at all.
+// DROP_ENABLED, DROP_TEST_MODE, MUSIC_BPM or MUSIC_TEST_MODE is set; otherwise
+// does nothing at all.
 void dropSetup();
 
 // Turn drop detection on or off while running (for the phone remote later).
@@ -51,3 +52,30 @@ int dropRingAgeMs();
 
 // After the 2 s status line: one "drop: ..." line when on, nothing when off.
 void dropPrintStatus();
+
+// ============================================================================
+// MUSIC BPM: the same mics, listening for the kick (tempo_detect.h)
+// ============================================================================
+//
+// The audio task also tracks the song's tempo when MUSIC_BPM (or
+// MUSIC_TEST_MODE) is on. This is what the faces need to draw it, already
+// moved onto millis() and run forward to now, so it can be read every frame.
+struct MusicNow {
+  bool live = false;        // locked on a tempo: show it
+  int bpm = 0;              // the whole number to show (0 = none)
+  uint32_t lastBeat = 0;    // millis() of the beat just gone (predicted; for the pulse)
+  uint32_t beats = 0;       // beats since it locked, counting on (for the 1-2-3-4)
+  float rawBpm = 0;         // test mode: the latest guess, locked or not (0 = none)
+  float conf = 0;           // test mode: how sure that guess is, 0..1
+  float confMin = 0;        // test mode: the line it has to clear
+};
+
+// From loop(). False (and live false) when the music BPM is off or the mics
+// didn't start.
+bool musicNow(MusicNow &m);
+
+// After the 2 s status line: one "music: ..." line when it's on.
+void musicPrintStatus();
+
+// In test mode, from loop(): a "music: ..." line twice a second.
+void musicLog();
