@@ -1,0 +1,16 @@
+# Everything the scripts make is rebuilt with build.py, so none of it is committed.
+out/
+*.npz
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Generated print files and previews, wherever they land.
+*.3mf
+*.stl
+*.png
+*.gif
+
+# ...except the final, slicer-tuned 3MFs you actually printed.
+!releases/**/*.3mf

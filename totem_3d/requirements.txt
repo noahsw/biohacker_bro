@@ -1,0 +1,4 @@
+# Python 3.10+. Install with: python3 -m pip install -r requirements.txt
+numpy>=1.26
+manifold3d>=3.5,<4  # the CSG kernel every build script uses
+pillow>=10.1        # only for the --renders previews
